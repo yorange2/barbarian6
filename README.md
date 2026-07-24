@@ -54,6 +54,16 @@ combat log stores message keys instead of text, so switching language also
 re-translates past log entries. To add a language, add a dictionary to
 `src/i18n.ts` and an `<option>` to the picker in `index.html`.
 
+## Screenshots
+
+A fresh game — your warband (blue, west), the rival empire (purple, east), and barbarians (red) between them:
+
+![Barbarian 6 at the start of a game](docs/screenshot-start.png)
+
+Victory, with the map fully explored and settled:
+
+![Barbarian 6 victory screen](docs/screenshot-victory.png)
+
 ## Code layout
 
 | File | What it does |
