@@ -122,11 +122,17 @@ export function render(
     drawHpBar(ctx, x, y, city.hp / city.maxHp);
   }
 
+  // Reachable tiles: bright cyan fill + outline, gently pulsing so the
+  // movement range stands out against any terrain.
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 350);
   for (const k of view.reachable.keys()) {
     const { x, y } = axialToPixel(fromKey(k), HEX_SIZE);
     pathHex(ctx, x, y);
-    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    ctx.fillStyle = `rgba(110, 205, 255, ${0.30 + 0.16 * pulse})`;
     ctx.fill();
+    ctx.strokeStyle = `rgba(180, 240, 255, ${0.75 + 0.2 * pulse})`;
+    ctx.lineWidth = 2;
+    ctx.stroke();
   }
 
   if (view.hover && game.world.has(key(view.hover))) {
