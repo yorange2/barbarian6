@@ -1,5 +1,7 @@
 # 🪓 Barbarian 6
 
+**English** · [简体中文](README.zh-CN.md)
+
 A simplified Civilization-style hex strategy game for the browser. Raze every
 barbarian camp and slay the barbarians before they wipe out your warband.
 
