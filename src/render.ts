@@ -112,7 +112,9 @@ export function render(
     const { x, y } = axialToPixel(u.pos, HEX_SIZE);
     ctx.beginPath();
     ctx.arc(x, y, HEX_SIZE * 0.52, 0, Math.PI * 2);
-    ctx.fillStyle = u.owner === 'player' ? '#2f6db3' : '#a83232';
+    // Player units that already acted are drawn dimmer.
+    ctx.fillStyle =
+      u.owner === 'player' ? (u.mp > 0 ? '#2f6db3' : '#1f4a77') : '#a83232';
     ctx.fill();
     if (u.id === view.selectedId) {
       ctx.strokeStyle = '#ffffff';
@@ -120,6 +122,10 @@ export function render(
     } else if (view.attackIds.has(u.id)) {
       ctx.strokeStyle = '#ff5533';
       ctx.lineWidth = 3;
+    } else if (u.owner === 'player' && u.mp > 0) {
+      // Gold ring: this unit still has moves left.
+      ctx.strokeStyle = '#ffd75e';
+      ctx.lineWidth = 2.5;
     } else {
       ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       ctx.lineWidth = 1.5;

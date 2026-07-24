@@ -74,6 +74,42 @@ function selectedCity(): City | null {
   return game.cities.find(c => c.id === view.selectedCityId) ?? null;
 }
 
+/** Pan the camera if a position is (nearly) outside the current view. */
+function ensureVisible(pos: Axial) {
+  const p = axialToPixel(pos, HEX_SIZE);
+  const rect = canvas.getBoundingClientRect();
+  const halfW = rect.width / 2 / cam.zoom;
+  const halfH = rect.height / 2 / cam.zoom;
+  const margin = HEX_SIZE * 2;
+  if (
+    p.x < cam.x - halfW + margin ||
+    p.x > cam.x + halfW - margin ||
+    p.y < cam.y - halfH + margin ||
+    p.y > cam.y + halfH - margin
+  ) {
+    cam.x = p.x;
+    cam.y = p.y;
+  }
+}
+
+/** After a unit finishes acting, jump to the next player unit with moves left. */
+function advanceSelection() {
+  const cur = selectedUnit();
+  if (cur && cur.mp > 0) return;
+  const candidates = game.units
+    .filter(u => u.owner === 'player' && u.mp > 0)
+    .sort((a, b) => a.id - b.id);
+  if (!candidates.length) {
+    view.selectedId = null;
+    return;
+  }
+  const prevId = view.selectedId ?? -1;
+  const next = candidates.find(u => u.id > prevId) ?? candidates[0];
+  view.selectedId = next.id;
+  view.selectedCityId = null;
+  ensureVisible(next.pos);
+}
+
 function refreshSelection() {
   if (!selectedCity()) view.selectedCityId = null;
   const u = selectedUnit();
@@ -142,8 +178,10 @@ function handleClick(hex: Axial) {
   const city = game.cityAt(hex);
   if (sel && target && target.owner === 'barbarian' && view.attackIds.has(target.id)) {
     game.attack(sel, target);
+    advanceSelection();
   } else if (sel && view.reachable.has(key(hex))) {
     game.move(sel, hex, view.reachable.get(key(hex))!);
+    advanceSelection();
   } else if (target && target.owner === 'player') {
     view.selectedId = target.id;
     view.selectedCityId = null;
@@ -164,9 +202,9 @@ panelEl.addEventListener('click', e => {
   if (!btn || game.over) return;
   const sel = selectedUnit();
   if (btn.dataset.action === 'found' && sel) {
-    if (game.foundCity(sel)) view.selectedId = null;
+    if (game.foundCity(sel)) advanceSelection();
   } else if (btn.dataset.action === 'build' && sel) {
-    game.build(sel);
+    if (game.build(sel)) advanceSelection();
   } else if (btn.dataset.action === 'produce') {
     const c = selectedCity();
     if (c) game.setProduction(c, btn.dataset.kind as ProducibleKind);
@@ -178,6 +216,7 @@ panelEl.addEventListener('click', e => {
 function endTurn() {
   if (game.over) return;
   game.endTurn();
+  if (!selectedCity()) advanceSelection();
   refreshSelection();
   updateUI();
 }
