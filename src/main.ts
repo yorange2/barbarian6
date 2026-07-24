@@ -201,16 +201,28 @@ canvas.addEventListener(
   { passive: false },
 );
 
+/** Research counts as awaiting orders when idle and something is researchable. */
+function researchPending(): boolean {
+  return game.researching === null && game.availableTechs().length > 0;
+}
+
 /**
  * When a player action leaves nothing awaiting orders, end the turn
  * automatically (after a beat, so the last action is visible).
  */
 let autoEndTimer: number | null = null;
 function maybeAutoEndTurn() {
-  if (game.over || pendingEntries().length > 0 || autoEndTimer !== null) return;
+  if (
+    game.over ||
+    pendingEntries().length > 0 ||
+    researchPending() ||
+    autoEndTimer !== null
+  ) {
+    return;
+  }
   autoEndTimer = window.setTimeout(() => {
     autoEndTimer = null;
-    if (!game.over && pendingEntries().length === 0) endTurn();
+    if (!game.over && pendingEntries().length === 0 && !researchPending()) endTurn();
   }, 350);
 }
 
@@ -289,6 +301,11 @@ endTurnBtn.addEventListener('click', () => {
     updateUI();
     return;
   }
+  if (!game.over && researchPending()) {
+    techPanel.classList.remove('hidden');
+    renderTechPanel();
+    return;
+  }
   endTurn();
 });
 techBtn.addEventListener('click', () => {
@@ -302,6 +319,7 @@ techPanel.addEventListener('click', e => {
   game.setResearch(btn.dataset.tech as TechId);
   techPanel.classList.add('hidden');
   updateUI();
+  maybeAutoEndTurn();
 });
 
 restartBtn.addEventListener('click', () => {
@@ -360,6 +378,10 @@ function updateUI() {
     endTurnBtn.textContent = t('endTurn.city');
     endTurnBtn.classList.add('warn');
     endTurnBtn.title = t('endTurn.force');
+  } else if (researchPending()) {
+    endTurnBtn.textContent = t('endTurn.research');
+    endTurnBtn.classList.add('warn');
+    endTurnBtn.title = t('endTurn.force');
   } else {
     endTurnBtn.textContent = t('endTurn');
     endTurnBtn.classList.remove('warn');
@@ -372,6 +394,7 @@ function updateUI() {
         turns: game.techTurns(game.researching),
       })
     : t('research.idle');
+  techBtn.classList.toggle('warn', researchPending());
   if (!techPanel.classList.contains('hidden')) renderTechPanel();
   logEl.innerHTML = game.log
     .slice(-6)

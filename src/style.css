@@ -169,11 +169,13 @@ button:hover {
   background: #cc8a3a;
 }
 
-#endturn.warn {
+#endturn.warn,
+#techbtn.warn {
   background: #c9962e;
   box-shadow: 0 0 8px rgba(255, 215, 94, 0.5);
 }
 
-#endturn.warn:hover {
+#endturn.warn:hover,
+#techbtn.warn:hover {
   background: #dba93a;
 }
