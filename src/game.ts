@@ -3,8 +3,9 @@ import {
   World,
   Tile,
   Improvement,
-  TERRAIN_INFO,
-  IMPROVEMENT_INFO,
+  tileYields,
+  tileMoveCost,
+  tileDefense,
   generateMap,
   MAP_W,
   MAP_H,
@@ -127,8 +128,14 @@ const SPAWN_EVERY = 6;
 const AGGRO_RANGE = 8;
 const BUILDER_CHARGES = 3;
 const MIN_CITY_SPACING = 3;
-const CITY_BASE_PROD = 2;
-const CITY_BASE_FOOD = 2;
+const CITY_BASE_PROD = 1;
+const CITY_BASE_FOOD = 1;
+const FOOD_PER_POP = 2;
+/** One-time yields granted to the owning city when a feature is chopped. */
+const CHOP_YIELDS: Record<'woods' | 'rainforest', { prod: number; food: number }> = {
+  woods: { prod: 20, food: 0 },
+  rainforest: { prod: 10, food: 10 },
+};
 const CITY_HP = 20;
 const CITY_STRENGTH = 6;
 const CITY_REGEN = 2;
@@ -217,7 +224,7 @@ export class Game {
   }
 
   passable(tile: Tile): boolean {
-    return TERRAIN_INFO[tile.terrain].moveCost !== null;
+    return tileMoveCost(tile) !== null;
   }
 
   unitAt(pos: Axial): Unit | null {
@@ -239,7 +246,7 @@ export class Game {
       for (const n of neighbors(cur)) {
         const tile = this.world.get(key(n));
         if (!tile || !this.passable(tile) || this.unitAt(n) || this.cityAt(n)) continue;
-        const c = cost + TERRAIN_INFO[tile.terrain].moveCost!;
+        const c = cost + tileMoveCost(tile)!;
         if (c <= unit.mp && c < (dist.get(key(n)) ?? Infinity)) {
           dist.set(key(n), c);
           frontier.push([n, c]);
@@ -285,8 +292,10 @@ export class Game {
       this.checkEnd();
       return;
     }
+    // Defenders benefit from their tile: hills and woods +3, marsh -2, etc.
     const attStr = att.rangedStrength ?? att.strength;
-    const dmg = this.rollDamage(attStr, att.hp / att.maxHp, def.strength);
+    const defTerrain = tileDefense(this.world.get(key(def.pos))!);
+    const dmg = this.rollDamage(attStr, att.hp / att.maxHp, def.strength + defTerrain);
     def.hp -= dmg;
     this.log.push({
       key: 'log.hit',
@@ -297,7 +306,12 @@ export class Game {
       this.units = this.units.filter(u => u !== def);
       if (!isRanged) this.move(att, def.pos, 0);
     } else if (!isRanged) {
-      const back = this.rollDamage(def.strength, def.hp / def.maxHp, att.strength);
+      const attTerrain = tileDefense(this.world.get(key(att.pos))!);
+      const back = this.rollDamage(
+        def.strength,
+        def.hp / def.maxHp,
+        att.strength + attTerrain,
+      );
       att.hp -= back;
       this.log.push({
         key: 'log.retaliate',
@@ -389,14 +403,51 @@ export class Game {
 
   improvementFor(pos: Axial): Improvement | null {
     const tile = this.world.get(key(pos));
-    if (!tile || tile.improvement) return null;
-    for (const [improv, info] of Object.entries(IMPROVEMENT_INFO)) {
-      if (info.terrain === tile.terrain) {
-        if (improv === 'mine' && !this.techs.has('mining')) return null;
-        return improv as Improvement;
-      }
-    }
+    if (!tile || tile.improvement || !this.passable(tile)) return null;
+    // Lumber camps go on woods; other features must be cleared first.
+    if (tile.feature === 'woods') return 'lumber';
+    if (tile.feature) return null;
+    if (tile.hills) return this.techs.has('mining') ? 'mine' : null;
+    if (tile.terrain === 'grassland' || tile.terrain === 'plains') return 'farm';
     return null;
+  }
+
+  /** How the feature on this tile can be removed by a builder, if at all. */
+  removalFor(pos: Axial): 'chop' | 'drain' | null {
+    const tile = this.world.get(key(pos));
+    if (!tile?.feature || tile.improvement) return null;
+    return tile.feature === 'woods' || tile.feature === 'rainforest'
+      ? 'chop'
+      : tile.feature === 'marsh'
+        ? 'drain'
+        : null;
+  }
+
+  chop(unit: Unit): boolean {
+    if (unit.kind !== 'builder' || !unit.charges) return false;
+    const removal = this.removalFor(unit.pos);
+    if (!removal || !this.canBuildAt(unit.pos)) return false;
+    const tile = this.world.get(key(unit.pos))!;
+    const feature = tile.feature!;
+    tile.feature = undefined;
+    unit.charges--;
+    unit.mp = 0;
+    if (removal === 'chop') {
+      const y = CHOP_YIELDS[feature as 'woods' | 'rainforest'];
+      const city = this.cities.find(c => c.id === tile.cityId);
+      if (city) {
+        city.progress += y.prod;
+        city.food += y.food;
+      }
+      this.log.push({
+        key: 'log.chop',
+        params: { unit: unit.nameKey, feature: `feature.${feature}`, prod: y.prod, food: y.food },
+      });
+    } else {
+      this.log.push({ key: 'log.drain', params: { unit: unit.nameKey } });
+    }
+    if (unit.charges <= 0) this.units = this.units.filter(u => u !== unit);
+    return true;
   }
 
   /** Improvements may only be built inside your own territory. */
@@ -430,17 +481,21 @@ export class Game {
     if (this.canProduce(kind)) city.producing = kind;
   }
 
-  /** Production and food: base + population + improvements inside this city's territory. */
+  /**
+   * City output: base + every tile in the territory (terrain + hills +
+   * feature + improvement). Food is net of consumption (2 per pop), so it
+   * can be negative when the city outgrows its land.
+   */
   cityYields(city: City): { prod: number; food: number } {
-    let prod = CITY_BASE_PROD + city.pop;
+    let prod = CITY_BASE_PROD;
     let food = CITY_BASE_FOOD;
     for (const tile of this.world.values()) {
-      if (tile.cityId !== city.id || !tile.improvement) continue;
-      const info = IMPROVEMENT_INFO[tile.improvement];
-      prod += info.prod;
-      food += info.food;
+      if (tile.cityId !== city.id) continue;
+      const y = tileYields(tile);
+      prod += y.prod;
+      food += y.food;
     }
-    return { prod, food };
+    return { prod, food: food - FOOD_PER_POP * city.pop };
   }
 
   growthNeed(city: City): number {
@@ -483,7 +538,7 @@ export class Game {
     for (const city of this.cities) {
       city.hp = Math.min(city.maxHp, city.hp + CITY_REGEN);
       const { prod, food } = this.cityYields(city);
-      city.food += food;
+      city.food = Math.max(0, city.food + food);
       if (city.food >= this.growthNeed(city)) {
         city.food -= this.growthNeed(city);
         const oldRadius = this.radiusForPop(city.pop);

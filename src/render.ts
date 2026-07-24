@@ -1,5 +1,5 @@
 import { Axial, DIRS, axialToPixel, fromKey, hexCorners, key } from './hex';
-import { TERRAIN_INFO, IMPROVEMENT_INFO } from './map';
+import { TERRAIN_INFO, FEATURE_INFO, IMPROVEMENT_INFO } from './map';
 import { Game } from './game';
 
 export const HEX_SIZE = 34;
@@ -54,8 +54,18 @@ export function render(
           : 'rgba(110, 170, 230, 0.16)';
       ctx.fill();
     }
+    if (tile.hills) {
+      // Two shaded humps hint at the hills attribute under any terrain.
+      ctx.beginPath();
+      ctx.arc(x - HEX_SIZE * 0.22, y + HEX_SIZE * 0.08, HEX_SIZE * 0.18, Math.PI, 0);
+      ctx.arc(x + HEX_SIZE * 0.2, y + HEX_SIZE * 0.14, HEX_SIZE * 0.24, Math.PI, 0);
+      ctx.fillStyle = 'rgba(60, 45, 25, 0.30)';
+      ctx.fill();
+    }
     if (tile.terrain === 'mountain') glyph(ctx, x, y, '⛰️', HEX_SIZE * 0.85);
-    if (tile.terrain === 'forest') glyph(ctx, x, y, '🌲', HEX_SIZE * 0.65);
+    if (tile.feature) {
+      glyph(ctx, x, y, FEATURE_INFO[tile.feature].icon, HEX_SIZE * 0.6);
+    }
     if (tile.camp) glyph(ctx, x, y, '⛺', HEX_SIZE * 0.85);
     if (tile.improvement) {
       glyph(ctx, x, y + HEX_SIZE * 0.42, IMPROVEMENT_INFO[tile.improvement].icon, HEX_SIZE * 0.66);

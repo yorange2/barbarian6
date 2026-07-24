@@ -16,7 +16,13 @@ npm run build    # production build in dist/ (deployable to GitHub Pages / itch.
 - **Click** one of your units (blue) to select it; highlighted hexes are where it can move this turn.
 - **Click** a red-ringed adjacent enemy to attack (defender strikes back).
 - **Drag** to pan the map, **scroll** to zoom, **Enter** (or the button) ends the turn.
-- Forests and hills cost 2 movement; water and mountains are impassable.
+- Civ-style tiles: terrain (grassland 2🌾, plains 1🌾1⚙, desert, tundra 1🌾)
+  with an optional hills attribute (+1⚙, +1 move, +3 defense) and at most one
+  feature on top — woods (+1⚙, +3 def, choppable for 20⚙), rainforest (+1🌾,
+  +3 def, choppable), marsh (+1🌾, −2 def, drainable), oasis (+3🌾, desert
+  only). Water and mountains are impassable. Defenders get their tile's
+  combat bonus. City output sums every tile in its territory; each pop eats
+  2 food.
 - Camps ⛺ spawn a new barbarian every 6 turns — raze them by moving onto them.
 - The Settler 🚩 founds a city (must be 3+ hexes from another city). Cities
   accumulate production ⚙ each turn and build new units — click a city to

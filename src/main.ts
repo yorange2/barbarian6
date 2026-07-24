@@ -12,7 +12,7 @@ import {
 } from './game';
 import { render, HEX_SIZE, Cam, ViewState } from './render';
 import { Axial, key, pixelToAxial, axialToPixel } from './hex';
-import { TERRAIN_INFO } from './map';
+import { tileYields, tileMoveCost, tileDefense } from './map';
 import { t, getLang, setLang, Lang } from './i18n';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map')!;
@@ -274,6 +274,11 @@ panelEl.addEventListener('click', e => {
       advanceSelection();
       acted = true;
     }
+  } else if (btn.dataset.action === 'chop' && sel) {
+    if (game.chop(sel)) {
+      advanceSelection();
+      acted = true;
+    }
   } else if (btn.dataset.action === 'produce') {
     const c = selectedCity();
     if (c) {
@@ -456,11 +461,20 @@ function updatePanel() {
       }
     } else if (sel.kind === 'builder' && sel.mp > 0) {
       const improv = game.improvementFor(sel.pos);
-      if (improv && game.canBuildAt(sel.pos)) {
+      const removal = game.removalFor(sel.pos);
+      const inside = game.canBuildAt(sel.pos);
+      if (inside && improv) {
         parts.push(
           `<button data-action="build">${t('action.build', { improv: `improv.${improv}` })}</button>`,
         );
-      } else if (improv) {
+      }
+      if (inside && removal) {
+        const featKey = `feature.${game.world.get(key(sel.pos))!.feature}`;
+        parts.push(
+          `<button data-action="chop">${t(removal === 'chop' ? 'action.chop' : 'action.drain', { feature: featKey })}</button>`,
+        );
+      }
+      if (!inside && (improv || removal)) {
         parts.push(`<span class="hint">${t('reason.outsideTerritory')}</span>`);
       }
     }
@@ -481,12 +495,13 @@ function updatePanel() {
     parts.push(
       `<b>${t('city')}</b> — ${t('panel.hp', { hp: selCity.hp, maxHp: selCity.maxHp })} · ${t('panel.pop', { n: selCity.pop })}`,
     );
-    const growTurns = Math.ceil(
-      Math.max(1, game.growthNeed(selCity) - selCity.food) / food,
-    );
-    parts.push(
-      `${t('panel.cityYields', { prod, food })} · ${t('panel.growth', { turns: growTurns })}`,
-    );
+    const growth =
+      food > 0
+        ? t('panel.growth', {
+            turns: Math.ceil(Math.max(1, game.growthNeed(selCity) - selCity.food) / food),
+          })
+        : t('panel.growthStalled');
+    parts.push(`${t('panel.cityYields', { prod, food })} · ${growth}`);
     if (selCity.producing) {
       const turns = Math.ceil(
         Math.max(0, PRODUCTION_COST[selCity.producing] - selCity.progress) / prod,
@@ -516,12 +531,21 @@ function updatePanel() {
   if (view.hover) {
     const tile = game.world.get(key(view.hover));
     if (tile) {
-      const info = TERRAIN_INFO[tile.terrain];
-      const cost =
-        info.moveCost === null ? t('tile.impassable') : t('tile.moveCost', { n: info.moveCost });
-      parts.push(
-        `${t(`terrain.${tile.terrain}`)} (${cost})${tile.camp ? ` · ${t('tile.camp')}` : ''}`,
-      );
+      const names = [t(`terrain.${tile.terrain}`)];
+      if (tile.hills) names.push(t('terrain.hillsAttr'));
+      if (tile.feature) names.push(t(`feature.${tile.feature}`));
+      if (tile.improvement) names.push(t(`improv.${tile.improvement}`));
+      if (tile.camp) names.push(t('tile.camp'));
+      parts.push(names.join(' · '));
+
+      const y = tileYields(tile);
+      const mc = tileMoveCost(tile);
+      const defn = tileDefense(tile);
+      const bits = [`🌾 ${y.food} · ⚙ ${y.prod}`];
+      bits.push(mc === null ? t('tile.impassable') : t('tile.moveCost', { n: mc }));
+      if (defn !== 0) bits.push(t('tile.defense', { n: (defn > 0 ? '+' : '') + defn }));
+      parts.push(`<span class="hint">${bits.join(' · ')}</span>`);
+
       const u = game.unitAt(view.hover);
       if (u && u !== sel) {
         parts.push(
