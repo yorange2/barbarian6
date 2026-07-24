@@ -178,13 +178,19 @@ function refreshSelection() {
 
 let dragStart: { x: number; y: number } | null = null;
 let dragged = false;
+// Touch devices synthesize a mouse event sequence after every tap. Those
+// fake events would re-run hover/click logic (rebuilding the panel mid-tap,
+// double-firing handleClick), so once touch is seen we ignore mouse events.
+let usingTouch = false;
 
 canvas.addEventListener('mousedown', e => {
+  if (usingTouch) return;
   dragStart = { x: e.clientX, y: e.clientY };
   dragged = false;
 });
 
 window.addEventListener('mousemove', e => {
+  if (usingTouch) return;
   if (dragStart && e.buttons & 1) {
     const dx = e.clientX - dragStart.x;
     const dy = e.clientY - dragStart.y;
@@ -200,6 +206,7 @@ window.addEventListener('mousemove', e => {
 });
 
 window.addEventListener('mouseup', e => {
+  if (usingTouch) return;
   if (dragStart && !dragged && e.target === canvas) {
     handleClick(screenToHex(e.clientX, e.clientY));
   }
@@ -239,6 +246,9 @@ let touchMoved = false;
 let pinchDist = 0;
 let pinchMid: { x: number; y: number } | null = null;
 
+// Catch any touch (even on DOM buttons) before its synthesized mouse events.
+window.addEventListener('touchstart', () => { usingTouch = true; }, { passive: true, capture: true });
+
 const touchDist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 const touchMid = (a: Touch, b: Touch) => ({
   x: (a.clientX + b.clientX) / 2,
@@ -249,6 +259,7 @@ canvas.addEventListener(
   'touchstart',
   e => {
     e.preventDefault();
+    usingTouch = true;
     if (e.touches.length === 1) {
       const p = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       touchLast = p;
