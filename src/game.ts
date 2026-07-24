@@ -98,6 +98,10 @@ export interface Unit {
   rangedStrength?: number;
   /** Remaining build actions (builders only). */
   charges?: number;
+  /** Asleep across turns until woken (by orders, attack, or adjacent enemy). */
+  sleeping?: boolean;
+  /** Standing down for this turn only; cleared at turn end. */
+  skipped?: boolean;
 }
 
 export interface City {
@@ -257,6 +261,7 @@ export class Game {
   }
 
   move(unit: Unit, dest: Axial, cost: number) {
+    unit.sleeping = false;
     unit.pos = dest;
     unit.mp = Math.max(0, unit.mp - cost);
     const tile = this.world.get(key(dest))!;
@@ -269,6 +274,8 @@ export class Game {
 
   attack(att: Unit, def: Unit) {
     att.mp = 0;
+    att.sleeping = false;
+    def.sleeping = false;
     const isRanged = att.rangedStrength !== undefined;
     // Civilians (strength 0) are defenseless: they die without a fight.
     if (def.strength <= 0) {
@@ -527,6 +534,14 @@ export class Game {
         u.hp = Math.min(u.maxHp, u.hp + HEAL_PER_TURN);
       }
       u.mp = u.maxMp;
+      u.skipped = false;
+      // An enemy closing to adjacency wakes a sleeping unit.
+      if (
+        u.sleeping &&
+        this.units.some(e => e.owner !== u.owner && distance(e.pos, u.pos) <= 1)
+      ) {
+        u.sleeping = false;
+      }
     }
     this.checkEnd();
   }

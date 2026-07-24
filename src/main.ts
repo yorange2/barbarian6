@@ -98,12 +98,15 @@ interface PendingEntry {
   city?: City;
 }
 
+/** A unit awaits orders: has moves left and is neither asleep nor skipped. */
+function unitPending(u: Unit): boolean {
+  return u.owner === 'player' && u.mp > 0 && !u.sleeping && !u.skipped;
+}
+
 /** Everything still awaiting orders: units with moves left, cities without production. */
 function pendingEntries(): PendingEntry[] {
   return [
-    ...game.units
-      .filter(u => u.owner === 'player' && u.mp > 0)
-      .map(u => ({ id: u.id, unit: u })),
+    ...game.units.filter(unitPending).map(u => ({ id: u.id, unit: u })),
     ...game.cities.filter(c => !c.producing).map(c => ({ id: c.id, city: c })),
   ].sort((a, b) => a.id - b.id);
 }
@@ -128,7 +131,7 @@ function focusNext() {
  */
 function advanceSelection() {
   const curUnit = selectedUnit();
-  if (curUnit && curUnit.mp > 0) return;
+  if (curUnit && unitPending(curUnit)) return;
   const curCity = selectedCity();
   if (curCity && !curCity.producing) return;
   const entries = pendingEntries();
@@ -278,6 +281,16 @@ panelEl.addEventListener('click', e => {
       advanceSelection();
       acted = true;
     }
+  } else if (btn.dataset.action === 'sleep' && sel) {
+    sel.sleeping = true;
+    advanceSelection();
+    acted = true;
+  } else if (btn.dataset.action === 'skip' && sel) {
+    sel.skipped = true;
+    advanceSelection();
+    acted = true;
+  } else if (btn.dataset.action === 'wake' && sel) {
+    sel.sleeping = false;
   }
   refreshSelection();
   updateUI();
@@ -340,6 +353,17 @@ langSel.addEventListener('change', () => {
 
 window.addEventListener('keydown', e => {
   if (e.key === 'Enter') endTurn();
+  if (e.key === ' ') {
+    e.preventDefault();
+    const sel = selectedUnit();
+    if (sel && sel.owner === 'player' && !game.over) {
+      sel.skipped = true;
+      advanceSelection();
+      refreshSelection();
+      updateUI();
+      maybeAutoEndTurn();
+    }
+  }
   if (e.key === 'Escape') {
     view.selectedId = null;
     view.selectedCityId = null;
@@ -368,7 +392,7 @@ function renderTechPanel() {
 
 function updateUI() {
   turnEl.textContent = t('turn', { n: game.turn });
-  const pendingUnits = game.units.filter(u => u.owner === 'player' && u.mp > 0).length;
+  const pendingUnits = game.units.filter(unitPending).length;
   const idleCities = game.cities.filter(c => !c.producing).length;
   if (pendingUnits > 0) {
     endTurnBtn.textContent = t('endTurn.units', { n: pendingUnits });
@@ -439,6 +463,14 @@ function updatePanel() {
       } else if (improv) {
         parts.push(`<span class="hint">${t('reason.outsideTerritory')}</span>`);
       }
+    }
+    if (sel.sleeping) {
+      parts.push(`<button data-action="wake">${t('action.wake')}</button>`);
+    } else if (sel.mp > 0) {
+      parts.push(
+        `<button data-action="skip">${t('action.skip')}</button>`,
+        `<button data-action="sleep">${t('action.sleep')}</button>`,
+      );
     }
     parts.push(`<span class="hint">${t('hint.selected')}</span>`);
   }

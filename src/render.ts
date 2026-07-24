@@ -119,11 +119,11 @@ export function render(
 
   for (const u of game.units) {
     const { x, y } = axialToPixel(u.pos, HEX_SIZE);
+    const awake = u.mp > 0 && !u.sleeping && !u.skipped;
     ctx.beginPath();
     ctx.arc(x, y, HEX_SIZE * 0.52, 0, Math.PI * 2);
-    // Player units that already acted are drawn dimmer.
-    ctx.fillStyle =
-      u.owner === 'player' ? (u.mp > 0 ? '#2f6db3' : '#1f4a77') : '#a83232';
+    // Player units that already acted (or stand down) are drawn dimmer.
+    ctx.fillStyle = u.owner === 'player' ? (awake ? '#2f6db3' : '#1f4a77') : '#a83232';
     ctx.fill();
     if (u.id === view.selectedId) {
       ctx.strokeStyle = '#ffffff';
@@ -131,8 +131,8 @@ export function render(
     } else if (view.attackIds.has(u.id)) {
       ctx.strokeStyle = '#ff5533';
       ctx.lineWidth = 3;
-    } else if (u.owner === 'player' && u.mp > 0) {
-      // Gold ring: this unit still has moves left.
+    } else if (u.owner === 'player' && awake) {
+      // Gold ring: this unit still awaits orders.
       ctx.strokeStyle = '#ffd75e';
       ctx.lineWidth = 2.5;
     } else {
@@ -141,6 +141,7 @@ export function render(
     }
     ctx.stroke();
     glyph(ctx, x, y, u.icon, HEX_SIZE * 0.62);
+    if (u.sleeping) glyph(ctx, x + HEX_SIZE * 0.42, y - HEX_SIZE * 0.42, '💤', HEX_SIZE * 0.5);
     drawHpBar(ctx, x, y, u.hp / u.maxHp);
   }
 }
