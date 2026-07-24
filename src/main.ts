@@ -201,17 +201,33 @@ canvas.addEventListener(
   { passive: false },
 );
 
+/**
+ * When a player action leaves nothing awaiting orders, end the turn
+ * automatically (after a beat, so the last action is visible).
+ */
+let autoEndTimer: number | null = null;
+function maybeAutoEndTurn() {
+  if (game.over || pendingEntries().length > 0 || autoEndTimer !== null) return;
+  autoEndTimer = window.setTimeout(() => {
+    autoEndTimer = null;
+    if (!game.over && pendingEntries().length === 0) endTurn();
+  }, 350);
+}
+
 function handleClick(hex: Axial) {
   if (game.over) return;
   const sel = selectedUnit();
   const target = game.unitAt(hex);
   const city = game.cityAt(hex);
+  let acted = false;
   if (sel && target && target.owner === 'barbarian' && view.attackIds.has(target.id)) {
     game.attack(sel, target);
     advanceSelection();
+    acted = true;
   } else if (sel && view.reachable.has(key(hex))) {
     game.move(sel, hex, view.reachable.get(key(hex))!);
     advanceSelection();
+    acted = true;
   } else if (target && target.owner === 'player') {
     view.selectedId = target.id;
     view.selectedCityId = null;
@@ -224,6 +240,7 @@ function handleClick(hex: Axial) {
   }
   refreshSelection();
   updateUI();
+  if (acted) maybeAutoEndTurn();
 }
 
 // Action buttons inside the panel (found city / build / choose production).
@@ -231,19 +248,28 @@ panelEl.addEventListener('click', e => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]');
   if (!btn || game.over) return;
   const sel = selectedUnit();
+  let acted = false;
   if (btn.dataset.action === 'found' && sel) {
-    if (game.foundCity(sel)) advanceSelection();
+    if (game.foundCity(sel)) {
+      advanceSelection();
+      acted = true;
+    }
   } else if (btn.dataset.action === 'build' && sel) {
-    if (game.build(sel)) advanceSelection();
+    if (game.build(sel)) {
+      advanceSelection();
+      acted = true;
+    }
   } else if (btn.dataset.action === 'produce') {
     const c = selectedCity();
     if (c) {
       game.setProduction(c, btn.dataset.kind as ProducibleKind);
       advanceSelection();
+      acted = true;
     }
   }
   refreshSelection();
   updateUI();
+  if (acted) maybeAutoEndTurn();
 });
 
 function endTurn() {
