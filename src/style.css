@@ -129,6 +129,24 @@ body {
   background: #4a6da3;
 }
 
+#techpanel button:disabled {
+  background: #3a4456;
+  opacity: 0.7;
+  cursor: default;
+}
+
+#techpanel button:disabled:hover {
+  background: #3a4456;
+}
+
+.tech-head {
+  margin-top: 10px;
+  font-weight: 600;
+  opacity: 0.85;
+  border-top: 1px solid #33465e;
+  padding-top: 8px;
+}
+
 #log {
   right: 12px;
   opacity: 0.9;

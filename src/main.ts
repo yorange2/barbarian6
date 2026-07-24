@@ -380,17 +380,40 @@ window.addEventListener('keydown', e => {
 // --- UI panels ---
 
 function renderTechPanel() {
+  const all = Object.keys(TECHS) as TechId[];
+  const completed = all.filter(id => game.techs.has(id));
+  const available = game.availableTechs();
+  const locked = all.filter(id => !game.techs.has(id) && !available.includes(id));
+
   const parts = [`<div class="hint">${t('panel.science', { n: game.scienceYield() })}</div>`];
-  for (const id of game.availableTechs()) {
-    const mark = game.researching === id ? '● ' : '';
+  if (completed.length) {
     parts.push(
-      `<button data-tech="${id}">${mark}${t('tech.option', {
-        tech: `tech.${id}`,
-        cost: TECHS[id].cost,
-        turns: game.techTurns(id),
-      })}</button>`,
-      `<div class="hint">${t(`tech.${id}.desc`)}</div>`,
+      `<div class="tech-head">${t('tech.completed')}</div>`,
+      `<div class="hint">${completed.map(id => `✅ ${t(`tech.${id}`)}`).join(' · ')}</div>`,
     );
+  }
+  if (available.length) {
+    parts.push(`<div class="tech-head">${t('tech.available')}</div>`);
+    for (const id of available) {
+      const mark = game.researching === id ? '● ' : '';
+      parts.push(
+        `<button data-tech="${id}">${mark}${t('tech.option', {
+          tech: `tech.${id}`,
+          cost: TECHS[id].cost,
+          turns: game.techTurns(id),
+        })}</button>`,
+        `<div class="hint">${t(`tech.${id}.desc`)}</div>`,
+      );
+    }
+  }
+  if (locked.length) {
+    parts.push(`<div class="tech-head">${t('tech.locked')}</div>`);
+    for (const id of locked) {
+      parts.push(
+        `<button disabled>🔒 ${t(`tech.${id}`)} — ${TECHS[id].cost} 🧪 · ${t('tech.requires', { tech: `tech.${TECHS[id].requires}` })}</button>`,
+        `<div class="hint">${t(`tech.${id}.desc`)}</div>`,
+      );
+    }
   }
   techPanel.innerHTML = parts.join('');
 }

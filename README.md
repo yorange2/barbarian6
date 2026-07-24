@@ -3,6 +3,9 @@
 A simplified Civilization-style hex strategy game for the browser. Raze every
 barbarian camp and slay the barbarians before they wipe out your warband.
 
+**Play it**: https://yorange2.github.io/barbarian6/ (deployed from `main` via
+GitHub Actions)
+
 ## Run it
 
 ```sh
