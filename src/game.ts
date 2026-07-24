@@ -1,11 +1,91 @@
 import { Axial, key, fromKey, neighbors, distance } from './hex';
-import { World, Tile, TERRAIN_INFO, generateMap, MAP_W, MAP_H } from './map';
+import {
+  World,
+  Tile,
+  Improvement,
+  TERRAIN_INFO,
+  IMPROVEMENT_INFO,
+  generateMap,
+  MAP_W,
+  MAP_H,
+} from './map';
 
 export type Owner = 'player' | 'barbarian';
 
+export type UnitKind =
+  | 'warrior'
+  | 'spearman'
+  | 'archer'
+  | 'horseman'
+  | 'scout'
+  | 'settler'
+  | 'builder'
+  | 'barbarian';
+export type ProducibleKind = Exclude<UnitKind, 'barbarian'>;
+
+interface Template {
+  nameKey: string;
+  icon: string;
+  hp: number;
+  strength: number;
+  mp: number;
+  /** Ranged units: attack distance and the strength used for ranged strikes. */
+  range?: number;
+  rangedStrength?: number;
+}
+
+const TEMPLATES: Record<UnitKind, Template> = {
+  warrior: { nameKey: 'unit.warrior', icon: '⚔️', hp: 20, strength: 8, mp: 2 },
+  spearman: { nameKey: 'unit.spearman', icon: '🛡️', hp: 25, strength: 11, mp: 2 },
+  archer: { nameKey: 'unit.archer', icon: '🏹', hp: 15, strength: 5, mp: 2, range: 2, rangedStrength: 8 },
+  horseman: { nameKey: 'unit.horseman', icon: '🏇', hp: 22, strength: 12, mp: 4 },
+  scout: { nameKey: 'unit.scout', icon: '🐎', hp: 14, strength: 5, mp: 3 },
+  settler: { nameKey: 'unit.settler', icon: '🚩', hp: 10, strength: 0, mp: 2 },
+  builder: { nameKey: 'unit.builder', icon: '🔨', hp: 10, strength: 0, mp: 2 },
+  barbarian: { nameKey: 'unit.barbarian', icon: '🪓', hp: 16, strength: 6, mp: 2 },
+};
+
+export const PRODUCIBLE: ProducibleKind[] = [
+  'warrior',
+  'spearman',
+  'archer',
+  'horseman',
+  'scout',
+  'builder',
+  'settler',
+];
+export const PRODUCTION_COST: Record<ProducibleKind, number> = {
+  warrior: 12,
+  spearman: 16,
+  archer: 14,
+  horseman: 20,
+  scout: 10,
+  builder: 10,
+  settler: 16,
+};
+
+// --- tech tree ---
+
+export type TechId = 'mining' | 'archery' | 'bronze' | 'wheel' | 'masonry';
+
+export const TECHS: Record<TechId, { cost: number; requires?: TechId }> = {
+  mining: { cost: 10 },
+  archery: { cost: 12 },
+  bronze: { cost: 18, requires: 'mining' },
+  wheel: { cost: 22, requires: 'mining' },
+  masonry: { cost: 20, requires: 'mining' },
+};
+
+export const UNIT_REQUIREMENTS: Partial<Record<ProducibleKind, TechId>> = {
+  spearman: 'bronze',
+  archer: 'archery',
+  horseman: 'wheel',
+};
+
 export interface Unit {
   id: number;
-  name: string;
+  kind: UnitKind;
+  nameKey: string;
   icon: string;
   owner: Owner;
   pos: Axial;
@@ -14,24 +94,55 @@ export interface Unit {
   strength: number;
   mp: number;
   maxMp: number;
+  range?: number;
+  rangedStrength?: number;
+  /** Remaining build actions (builders only). */
+  charges?: number;
 }
 
-const TEMPLATES = {
-  warrior: { name: 'Warrior', icon: '⚔️', hp: 20, strength: 8, mp: 2 },
-  scout: { name: 'Scout', icon: '🐎', hp: 14, strength: 5, mp: 3 },
-  barbarian: { name: 'Barbarian', icon: '🪓', hp: 16, strength: 6, mp: 2 },
-} as const;
+export interface City {
+  id: number;
+  pos: Axial;
+  hp: number;
+  maxHp: number;
+  strength: number;
+  pop: number;
+  food: number;
+  producing: ProducibleKind | null;
+  progress: number;
+}
+
+/** Logs store i18n keys + params, not text, so language switches re-render history. */
+export interface LogEntry {
+  key: string;
+  params?: Record<string, string | number>;
+}
 
 const MAX_BARBARIANS = 8;
 const SPAWN_EVERY = 6;
 const AGGRO_RANGE = 8;
+const BUILDER_CHARGES = 3;
+const MIN_CITY_SPACING = 3;
+const CITY_BASE_PROD = 2;
+const CITY_BASE_FOOD = 2;
+const CITY_HP = 20;
+const CITY_STRENGTH = 6;
+const CITY_REGEN = 2;
+const WALL_HP = 10;
+const WALL_STRENGTH = 3;
+const HEAL_PER_TURN = 4;
+const BASE_SCIENCE = 2;
 
 export class Game {
   world: World;
   units: Unit[] = [];
+  cities: City[] = [];
   turn = 1;
-  log: string[] = [];
+  log: LogEntry[] = [];
   over: 'victory' | 'defeat' | null = null;
+  techs = new Set<TechId>();
+  researching: TechId | null = null;
+  private techProgress: Partial<Record<TechId, number>> = {};
   private nextId = 1;
 
   constructor() {
@@ -45,6 +156,8 @@ export class Game {
     this.spawnNear('warrior', 'player', { q: leftQ, r: midR });
     this.spawnNear('warrior', 'player', { q: leftQ + 1, r: midR });
     this.spawnNear('scout', 'player', { q: leftQ, r: midR - 1 });
+    this.spawnNear('settler', 'player', { q: leftQ, r: midR + 1 });
+    this.spawnNear('builder', 'player', { q: leftQ + 1, r: midR - 1 });
 
     for (const r of [4, MAP_H - 4]) {
       const q = -Math.floor(r / 2) + MAP_W - 4;
@@ -54,16 +167,17 @@ export class Game {
         this.spawnNear('barbarian', 'barbarian', campPos);
       }
     }
-    this.log.push('Raze every barbarian camp ⛺ and slay the barbarians. Do not die.');
+    this.log.push({ key: 'log.intro' });
   }
 
-  private spawnNear(kind: keyof typeof TEMPLATES, owner: Owner, near: Axial) {
+  private spawnNear(kind: UnitKind, owner: Owner, near: Axial) {
     const pos = this.nearestFree(near);
     if (!pos) return;
     const t = TEMPLATES[kind];
     this.units.push({
       id: this.nextId++,
-      name: t.name,
+      kind,
+      nameKey: t.nameKey,
       icon: t.icon,
       owner,
       pos,
@@ -72,6 +186,9 @@ export class Game {
       strength: t.strength,
       mp: t.mp,
       maxMp: t.mp,
+      range: t.range,
+      rangedStrength: t.rangedStrength,
+      charges: kind === 'builder' ? BUILDER_CHARGES : undefined,
     });
   }
 
@@ -81,7 +198,9 @@ export class Game {
     while (queue.length) {
       const cur = queue.shift()!;
       const tile = this.world.get(key(cur));
-      if (tile && this.passable(tile) && !this.unitAt(cur)) return cur;
+      if (tile && this.passable(tile) && !this.unitAt(cur) && !this.cityAt(cur)) {
+        return cur;
+      }
       for (const n of neighbors(cur)) {
         const k = key(n);
         if (!seen.has(k) && this.world.has(k)) {
@@ -101,6 +220,10 @@ export class Game {
     return this.units.find(u => u.pos.q === pos.q && u.pos.r === pos.r) ?? null;
   }
 
+  cityAt(pos: Axial): City | null {
+    return this.cities.find(c => c.pos.q === pos.q && c.pos.r === pos.r) ?? null;
+  }
+
   /** Tiles the unit can reach this turn (Dijkstra over movement costs). */
   reachable(unit: Unit): Map<string, number> {
     const dist = new Map<string, number>([[key(unit.pos), 0]]);
@@ -111,7 +234,7 @@ export class Game {
       if (cost > (dist.get(key(cur)) ?? Infinity)) continue;
       for (const n of neighbors(cur)) {
         const tile = this.world.get(key(n));
-        if (!tile || !this.passable(tile) || this.unitAt(n)) continue;
+        if (!tile || !this.passable(tile) || this.unitAt(n) || this.cityAt(n)) continue;
         const c = cost + TERRAIN_INFO[tile.terrain].moveCost!;
         if (c <= unit.mp && c < (dist.get(key(n)) ?? Infinity)) {
           dist.set(key(n), c);
@@ -124,10 +247,13 @@ export class Game {
   }
 
   attackTargets(unit: Unit): Unit[] {
-    if (unit.mp <= 0) return [];
-    return this.units.filter(
-      u => u.owner !== unit.owner && distance(u.pos, unit.pos) === 1,
-    );
+    if (unit.mp <= 0 || unit.strength <= 0) return [];
+    const range = unit.range ?? 1;
+    return this.units.filter(u => {
+      if (u.owner === unit.owner) return false;
+      const d = distance(u.pos, unit.pos);
+      return d >= 1 && d <= range;
+    });
   }
 
   move(unit: Unit, dest: Axial, cost: number) {
@@ -136,71 +262,314 @@ export class Game {
     const tile = this.world.get(key(dest))!;
     if (tile.camp && unit.owner === 'player') {
       tile.camp = false;
-      this.log.push(`⛺ ${unit.name} razed a barbarian camp!`);
+      this.log.push({ key: 'log.razed', params: { unit: unit.nameKey } });
       this.checkEnd();
     }
   }
 
   attack(att: Unit, def: Unit) {
     att.mp = 0;
-    const dmg = this.damage(att, def);
-    def.hp -= dmg;
-    this.log.push(`${att.icon} ${att.name} hits ${def.icon} ${def.name} for ${dmg}.`);
-    if (def.hp <= 0) {
-      this.log.push(`${def.icon} ${def.name} dies!`);
+    const isRanged = att.rangedStrength !== undefined;
+    // Civilians (strength 0) are defenseless: they die without a fight.
+    if (def.strength <= 0) {
+      this.log.push({ key: 'log.dies', params: { unit: def.nameKey } });
       this.units = this.units.filter(u => u !== def);
-      this.move(att, def.pos, 0);
-    } else {
-      const back = this.damage(def, att);
+      if (!isRanged) this.move(att, def.pos, 0);
+      this.checkEnd();
+      return;
+    }
+    const attStr = att.rangedStrength ?? att.strength;
+    const dmg = this.rollDamage(attStr, att.hp / att.maxHp, def.strength);
+    def.hp -= dmg;
+    this.log.push({
+      key: 'log.hit',
+      params: { att: att.nameKey, def: def.nameKey, dmg },
+    });
+    if (def.hp <= 0) {
+      this.log.push({ key: 'log.dies', params: { unit: def.nameKey } });
+      this.units = this.units.filter(u => u !== def);
+      if (!isRanged) this.move(att, def.pos, 0);
+    } else if (!isRanged) {
+      const back = this.rollDamage(def.strength, def.hp / def.maxHp, att.strength);
       att.hp -= back;
-      this.log.push(`${def.icon} ${def.name} strikes back for ${back}.`);
+      this.log.push({
+        key: 'log.retaliate',
+        params: { def: def.nameKey, dmg: back },
+      });
       if (att.hp <= 0) {
-        this.log.push(`${att.icon} ${att.name} dies!`);
+        this.log.push({ key: 'log.dies', params: { unit: att.nameKey } });
         this.units = this.units.filter(u => u !== att);
       }
     }
     this.checkEnd();
   }
 
-  private damage(att: Unit, def: Unit): number {
-    const ratio = att.strength / def.strength;
-    const health = 0.5 + 0.5 * (att.hp / att.maxHp);
+  attackCity(att: Unit, city: City) {
+    att.mp = 0;
+    const dmg = this.rollDamage(att.strength, att.hp / att.maxHp, city.strength);
+    city.hp -= dmg;
+    this.log.push({ key: 'log.hit', params: { att: att.nameKey, def: 'city', dmg } });
+    if (city.hp <= 0) {
+      this.cities = this.cities.filter(c => c !== city);
+      for (const tile of this.world.values()) {
+        if (tile.cityId === city.id) tile.cityId = undefined;
+      }
+      this.log.push({ key: 'log.cityRazed' });
+    } else {
+      const back = this.rollDamage(city.strength, city.hp / city.maxHp, att.strength);
+      att.hp -= back;
+      this.log.push({ key: 'log.retaliate', params: { def: 'city', dmg: back } });
+      if (att.hp <= 0) {
+        this.log.push({ key: 'log.dies', params: { unit: att.nameKey } });
+        this.units = this.units.filter(u => u !== att);
+      }
+    }
+    this.checkEnd();
+  }
+
+  private rollDamage(attStr: number, healthFrac: number, defStr: number): number {
+    const ratio = attStr / defStr;
+    const health = 0.5 + 0.5 * healthFrac;
     return Math.max(1, Math.round(5 * ratio * health * (0.85 + Math.random() * 0.3)));
   }
+
+  // --- settler: found cities ---
+
+  canFound(unit: Unit): boolean {
+    return (
+      unit.kind === 'settler' &&
+      this.cities.every(c => distance(c.pos, unit.pos) >= MIN_CITY_SPACING)
+    );
+  }
+
+  foundCity(unit: Unit): boolean {
+    if (!this.canFound(unit)) return false;
+    const walls = this.techs.has('masonry');
+    const hp = CITY_HP + (walls ? WALL_HP : 0);
+    const city: City = {
+      id: this.nextId++,
+      pos: unit.pos,
+      hp,
+      maxHp: hp,
+      strength: CITY_STRENGTH + (walls ? WALL_STRENGTH : 0),
+      pop: 1,
+      food: 0,
+      producing: null,
+      progress: 0,
+    };
+    this.cities.push(city);
+    this.claimTerritory(city, this.radiusForPop(city.pop));
+    this.units = this.units.filter(u => u !== unit);
+    this.log.push({ key: 'log.cityFounded' });
+    return true;
+  }
+
+  /** Borders start at 1 hex and expand with population (pop 3 → 2, pop 5 → 3). */
+  private radiusForPop(pop: number): number {
+    return pop >= 5 ? 3 : pop >= 3 ? 2 : 1;
+  }
+
+  /** Claim unowned tiles within radius; claimed tiles never change hands. */
+  private claimTerritory(city: City, radius: number) {
+    for (const tile of this.world.values()) {
+      if (tile.cityId === undefined && distance(tile.pos, city.pos) <= radius) {
+        tile.cityId = city.id;
+      }
+    }
+  }
+
+  // --- builder: improve tiles ---
+
+  improvementFor(pos: Axial): Improvement | null {
+    const tile = this.world.get(key(pos));
+    if (!tile || tile.improvement) return null;
+    for (const [improv, info] of Object.entries(IMPROVEMENT_INFO)) {
+      if (info.terrain === tile.terrain) {
+        if (improv === 'mine' && !this.techs.has('mining')) return null;
+        return improv as Improvement;
+      }
+    }
+    return null;
+  }
+
+  /** Improvements may only be built inside your own territory. */
+  canBuildAt(pos: Axial): boolean {
+    return this.world.get(key(pos))?.cityId !== undefined;
+  }
+
+  build(unit: Unit): boolean {
+    if (unit.kind !== 'builder' || !unit.charges) return false;
+    const improv = this.improvementFor(unit.pos);
+    if (!improv || !this.canBuildAt(unit.pos)) return false;
+    this.world.get(key(unit.pos))!.improvement = improv;
+    unit.charges--;
+    unit.mp = 0;
+    this.log.push({
+      key: 'log.built',
+      params: { unit: unit.nameKey, improv: `improv.${improv}` },
+    });
+    if (unit.charges <= 0) this.units = this.units.filter(u => u !== unit);
+    return true;
+  }
+
+  // --- cities: growth and production ---
+
+  canProduce(kind: ProducibleKind): boolean {
+    const req = UNIT_REQUIREMENTS[kind];
+    return !req || this.techs.has(req);
+  }
+
+  setProduction(city: City, kind: ProducibleKind) {
+    if (this.canProduce(kind)) city.producing = kind;
+  }
+
+  /** Production and food: base + population + improvements inside this city's territory. */
+  cityYields(city: City): { prod: number; food: number } {
+    let prod = CITY_BASE_PROD + city.pop;
+    let food = CITY_BASE_FOOD;
+    for (const tile of this.world.values()) {
+      if (tile.cityId !== city.id || !tile.improvement) continue;
+      const info = IMPROVEMENT_INFO[tile.improvement];
+      prod += info.prod;
+      food += info.food;
+    }
+    return { prod, food };
+  }
+
+  growthNeed(city: City): number {
+    return 8 + 4 * city.pop;
+  }
+
+  // --- research ---
+
+  scienceYield(): number {
+    let s = BASE_SCIENCE;
+    for (const c of this.cities) s += 1 + c.pop;
+    return s;
+  }
+
+  availableTechs(): TechId[] {
+    return (Object.keys(TECHS) as TechId[]).filter(id => {
+      if (this.techs.has(id)) return false;
+      const req = TECHS[id].requires;
+      return !req || this.techs.has(req);
+    });
+  }
+
+  setResearch(id: TechId) {
+    if (this.availableTechs().includes(id)) this.researching = id;
+  }
+
+  techTurns(id: TechId): number {
+    const remaining = TECHS[id].cost - (this.techProgress[id] ?? 0);
+    return Math.max(1, Math.ceil(remaining / this.scienceYield()));
+  }
+
+  // --- turn cycle ---
 
   endTurn() {
     if (this.over) return;
     this.barbarianTurn();
     this.turn++;
     if (this.turn % SPAWN_EVERY === 0) this.spawnFromCamps();
-    for (const u of this.units) u.mp = u.maxMp;
+
+    for (const city of this.cities) {
+      city.hp = Math.min(city.maxHp, city.hp + CITY_REGEN);
+      const { prod, food } = this.cityYields(city);
+      city.food += food;
+      if (city.food >= this.growthNeed(city)) {
+        city.food -= this.growthNeed(city);
+        const oldRadius = this.radiusForPop(city.pop);
+        city.pop++;
+        this.log.push({ key: 'log.growth', params: { n: city.pop } });
+        const newRadius = this.radiusForPop(city.pop);
+        if (newRadius > oldRadius) {
+          this.claimTerritory(city, newRadius);
+          this.log.push({ key: 'log.borders' });
+        }
+      }
+      if (city.producing) {
+        city.progress += prod;
+        const cost = PRODUCTION_COST[city.producing];
+        if (city.progress >= cost) {
+          this.spawnNear(city.producing, 'player', city.pos);
+          this.log.push({
+            key: 'log.produced',
+            params: { item: `unit.${city.producing}` },
+          });
+          city.progress -= cost;
+          city.producing = null;
+        }
+      }
+    }
+
+    if (this.researching) {
+      const id = this.researching;
+      const p = (this.techProgress[id] ?? 0) + this.scienceYield();
+      this.techProgress[id] = p;
+      if (p >= TECHS[id].cost) {
+        this.techs.add(id);
+        this.researching = null;
+        this.log.push({ key: 'log.research', params: { tech: `tech.${id}` } });
+        if (id === 'masonry') {
+          for (const c of this.cities) {
+            c.maxHp += WALL_HP;
+            c.hp += WALL_HP;
+            c.strength += WALL_STRENGTH;
+          }
+        }
+      }
+    }
+
+    // Units that spent the whole turn resting heal before movement resets.
+    for (const u of this.units) {
+      if (u.mp >= u.maxMp && u.hp < u.maxHp) {
+        u.hp = Math.min(u.maxHp, u.hp + HEAL_PER_TURN);
+      }
+      u.mp = u.maxMp;
+    }
     this.checkEnd();
   }
 
   private barbarianTurn() {
     for (const barb of [...this.units]) {
       if (barb.owner !== 'barbarian' || barb.hp <= 0) continue;
-      const players = this.units.filter(u => u.owner === 'player');
-      if (!players.length) return;
+      const targetPositions = [
+        ...this.units.filter(u => u.owner === 'player').map(u => u.pos),
+        ...this.cities.map(c => c.pos),
+      ];
+      if (!targetPositions.length) return;
 
-      const targets = this.attackTargets(barb);
-      if (targets.length) {
-        targets.sort((a, b) => a.hp - b.hp);
-        this.attack(barb, targets[0]);
-        continue;
-      }
+      const tryAttack = (): boolean => {
+        const targets = this.attackTargets(barb);
+        if (targets.length) {
+          targets.sort((a, b) => a.hp - b.hp);
+          this.attack(barb, targets[0]);
+          return true;
+        }
+        if (barb.mp > 0) {
+          const city = this.cities.find(c => distance(c.pos, barb.pos) === 1);
+          if (city) {
+            this.attackCity(barb, city);
+            return true;
+          }
+        }
+        return false;
+      };
 
-      let nearest = players[0];
-      for (const p of players) {
-        if (distance(barb.pos, p.pos) < distance(barb.pos, nearest.pos)) nearest = p;
+      if (tryAttack()) continue;
+
+      let nearest = targetPositions[0];
+      for (const p of targetPositions) {
+        if (distance(barb.pos, p) < distance(barb.pos, nearest)) nearest = p;
       }
-      if (distance(barb.pos, nearest.pos) > AGGRO_RANGE) continue;
+      if (distance(barb.pos, nearest) > AGGRO_RANGE) continue;
 
       const options = this.reachable(barb);
       let best: Axial | null = null;
-      let bestD = distance(barb.pos, nearest.pos);
+      let bestD = distance(barb.pos, nearest);
       for (const k of options.keys()) {
-        const d = distance(fromKey(k), nearest.pos);
+        const d = distance(fromKey(k), nearest);
         if (d < bestD) {
           bestD = d;
           best = fromKey(k);
@@ -208,8 +577,7 @@ export class Game {
       }
       if (best) {
         this.move(barb, best, options.get(key(best))!);
-        const after = this.attackTargets(barb);
-        if (after.length) this.attack(barb, after[0]);
+        tryAttack();
       }
     }
   }
@@ -220,13 +588,13 @@ export class Game {
     for (const tile of this.world.values()) {
       if (!tile.camp) continue;
       this.spawnNear('barbarian', 'barbarian', tile.pos);
-      this.log.push('⛺ A new barbarian emerges from a camp!');
+      this.log.push({ key: 'log.spawn' });
     }
   }
 
   private checkEnd() {
     if (this.over) return;
-    if (!this.units.some(u => u.owner === 'player')) {
+    if (!this.units.some(u => u.owner === 'player') && !this.cities.length) {
       this.over = 'defeat';
       return;
     }

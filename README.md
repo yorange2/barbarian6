@@ -18,6 +18,32 @@ npm run build    # production build in dist/ (deployable to GitHub Pages / itch.
 - **Drag** to pan the map, **scroll** to zoom, **Enter** (or the button) ends the turn.
 - Forests and hills cost 2 movement; water and mountains are impassable.
 - Camps ⛺ spawn a new barbarian every 6 turns — raze them by moving onto them.
+- The Settler 🚩 founds a city (must be 3+ hexes from another city). Cities
+  accumulate production ⚙ each turn and build new units — click a city to
+  choose what it produces. Barbarians attack cities; a city at 0 HP is razed.
+- Cities grow: food 🌾 accumulates each turn and raises population, which adds
+  production and science. Farms feed growth; mines and lumber camps add
+  production.
+- Cities have territory (blue border): 1 hex at founding, expanding to 2 hexes
+  at population 3 and 3 hexes at population 5. Claimed tiles never change
+  hands; a razed city frees its territory.
+- The Builder 🔨 has 3 charges to build a farm 🌾 (grassland), mine ⛏️ (hills,
+  requires Mining tech), or lumber camp 🪵 (forest) — only inside your own
+  territory, and only improvements inside a city's territory count toward its
+  yields.
+- Research 🧪: pick a tech from the top-bar tech button. Mining → Bronze
+  Working (🛡️ Spearman), The Wheel (🏇 Horseman), Masonry (city walls);
+  Archery unlocks the 🏹 Archer, which strikes 2 hexes away with no
+  retaliation.
+- Units that spend a full turn resting heal 4 HP.
+
+## Languages
+
+English and 简体中文, switchable from the top bar (persisted in `localStorage`,
+default follows the browser language). All UI text lives in `src/i18n.ts`; the
+combat log stores message keys instead of text, so switching language also
+re-translates past log entries. To add a language, add a dictionary to
+`src/i18n.ts` and an `<option>` to the picker in `index.html`.
 
 ## Code layout
 

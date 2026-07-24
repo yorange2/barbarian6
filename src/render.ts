@@ -1,5 +1,5 @@
-import { Axial, axialToPixel, fromKey, hexCorners, key } from './hex';
-import { TERRAIN_INFO } from './map';
+import { Axial, DIRS, axialToPixel, fromKey, hexCorners, key } from './hex';
+import { TERRAIN_INFO, IMPROVEMENT_INFO } from './map';
 import { Game } from './game';
 
 export const HEX_SIZE = 34;
@@ -13,6 +13,7 @@ export interface Cam {
 export interface ViewState {
   hover: Axial | null;
   selectedId: number | null;
+  selectedCityId: number | null;
   reachable: Map<string, number>;
   attackIds: Set<number>;
 }
@@ -45,9 +46,51 @@ export function render(
     ctx.strokeStyle = 'rgba(0,0,0,0.25)';
     ctx.lineWidth = 1;
     ctx.stroke();
+    if (tile.cityId !== undefined) {
+      pathHex(ctx, x, y);
+      ctx.fillStyle =
+        tile.cityId === view.selectedCityId
+          ? 'rgba(110, 170, 230, 0.32)'
+          : 'rgba(110, 170, 230, 0.16)';
+      ctx.fill();
+    }
     if (tile.terrain === 'mountain') glyph(ctx, x, y, '⛰️', HEX_SIZE * 0.85);
     if (tile.terrain === 'forest') glyph(ctx, x, y, '🌲', HEX_SIZE * 0.65);
     if (tile.camp) glyph(ctx, x, y, '⛺', HEX_SIZE * 0.85);
+    if (tile.improvement) {
+      glyph(ctx, x, y + HEX_SIZE * 0.42, IMPROVEMENT_INFO[tile.improvement].icon, HEX_SIZE * 0.66);
+    }
+  }
+
+  // Territory borders: draw each edge where ownership changes.
+  ctx.strokeStyle = '#5f9fdc';
+  ctx.lineWidth = 2;
+  for (const tile of game.world.values()) {
+    if (tile.cityId === undefined) continue;
+    const { x, y } = axialToPixel(tile.pos, HEX_SIZE);
+    const pts = hexCorners(x, y, HEX_SIZE);
+    DIRS.forEach((d, i) => {
+      const n = game.world.get(key({ q: tile.pos.q + d.q, r: tile.pos.r + d.r }));
+      if (n && n.cityId === tile.cityId) return;
+      const c1 = (6 - i) % 6;
+      const c2 = (c1 + 1) % 6;
+      ctx.beginPath();
+      ctx.moveTo(pts[c1][0], pts[c1][1]);
+      ctx.lineTo(pts[c2][0], pts[c2][1]);
+      ctx.stroke();
+    });
+  }
+
+  for (const city of game.cities) {
+    const { x, y } = axialToPixel(city.pos, HEX_SIZE);
+    pathHex(ctx, x, y);
+    ctx.fillStyle = 'rgba(47, 109, 179, 0.45)';
+    ctx.fill();
+    ctx.strokeStyle = city.id === view.selectedCityId ? '#ffffff' : '#2f6db3';
+    ctx.lineWidth = city.id === view.selectedCityId ? 3 : 2;
+    ctx.stroke();
+    glyph(ctx, x, y, '🏛️', HEX_SIZE * 0.8);
+    drawHpBar(ctx, x, y, city.hp / city.maxHp);
   }
 
   for (const k of view.reachable.keys()) {
@@ -83,14 +126,16 @@ export function render(
     }
     ctx.stroke();
     glyph(ctx, x, y, u.icon, HEX_SIZE * 0.62);
-
-    const bw = HEX_SIZE * 1.1;
-    const frac = u.hp / u.maxHp;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.fillRect(x - bw / 2, y - HEX_SIZE * 0.88, bw, 5);
-    ctx.fillStyle = frac > 0.5 ? '#5fd35f' : frac > 0.25 ? '#e0c341' : '#e05341';
-    ctx.fillRect(x - bw / 2, y - HEX_SIZE * 0.88, bw * frac, 5);
+    drawHpBar(ctx, x, y, u.hp / u.maxHp);
   }
+}
+
+function drawHpBar(ctx: CanvasRenderingContext2D, x: number, y: number, frac: number) {
+  const bw = HEX_SIZE * 1.1;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(x - bw / 2, y - HEX_SIZE * 0.88, bw, 5);
+  ctx.fillStyle = frac > 0.5 ? '#5fd35f' : frac > 0.25 ? '#e0c341' : '#e05341';
+  ctx.fillRect(x - bw / 2, y - HEX_SIZE * 0.88, bw * frac, 5);
 }
 
 function pathHex(ctx: CanvasRenderingContext2D, x: number, y: number) {

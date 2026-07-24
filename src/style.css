@@ -39,8 +39,14 @@ body {
   opacity: 0.8;
 }
 
-#endturn {
+#lang {
   margin-left: auto;
+  background: #2a3a50;
+  color: #e8e4d8;
+  border: 1px solid #33465e;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
 }
 
 #map {
@@ -66,11 +72,61 @@ body {
   font-size: 13px;
   line-height: 1.5;
   max-width: 340px;
+}
+
+#log {
   pointer-events: none;
 }
 
 #panel {
   left: 12px;
+}
+
+#panel button {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-align: left;
+}
+
+#panel button:disabled {
+  background: #4a5568;
+  opacity: 0.7;
+  cursor: default;
+}
+
+#techpanel {
+  position: absolute;
+  top: 54px;
+  right: 12px;
+  width: 340px;
+  background: rgba(20, 28, 38, 0.95);
+  border: 1px solid #33465e;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  z-index: 5;
+}
+
+#techpanel.hidden {
+  display: none;
+}
+
+#techpanel button {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-align: left;
+  background: #3a5a8a;
+}
+
+#techpanel button:hover {
+  background: #4a6da3;
 }
 
 #log {

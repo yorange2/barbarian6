@@ -1,8 +1,19 @@
 import './style.css';
-import { Game, Unit } from './game';
+import {
+  Game,
+  Unit,
+  City,
+  ProducibleKind,
+  PRODUCIBLE,
+  PRODUCTION_COST,
+  UNIT_REQUIREMENTS,
+  TECHS,
+  TechId,
+} from './game';
 import { render, HEX_SIZE, Cam, ViewState } from './render';
 import { Axial, key, pixelToAxial, axialToPixel } from './hex';
 import { TERRAIN_INFO } from './map';
+import { t, getLang, setLang, Lang } from './i18n';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#map')!;
 const ctx = canvas.getContext('2d')!;
@@ -11,12 +22,18 @@ const panelEl = document.querySelector<HTMLDivElement>('#panel')!;
 const logEl = document.querySelector<HTMLDivElement>('#log')!;
 const bannerEl = document.querySelector<HTMLDivElement>('#banner')!;
 const bannerText = document.querySelector<HTMLDivElement>('#banner-text')!;
+const endTurnBtn = document.querySelector<HTMLButtonElement>('#endturn')!;
+const restartBtn = document.querySelector<HTMLButtonElement>('#restart')!;
+const langSel = document.querySelector<HTMLSelectElement>('#lang')!;
+const techBtn = document.querySelector<HTMLButtonElement>('#techbtn')!;
+const techPanel = document.querySelector<HTMLDivElement>('#techpanel')!;
 
 let game = new Game();
 const cam: Cam = { x: 0, y: 0, zoom: 1 };
 const view: ViewState = {
   hover: null,
   selectedId: null,
+  selectedCityId: null,
   reachable: new Map(),
   attackIds: new Set(),
 };
@@ -53,7 +70,12 @@ function selectedUnit(): Unit | null {
   return game.units.find(u => u.id === view.selectedId) ?? null;
 }
 
+function selectedCity(): City | null {
+  return game.cities.find(c => c.id === view.selectedCityId) ?? null;
+}
+
 function refreshSelection() {
+  if (!selectedCity()) view.selectedCityId = null;
   const u = selectedUnit();
   if (!u || u.owner !== 'player') {
     view.selectedId = null;
@@ -62,7 +84,7 @@ function refreshSelection() {
     return;
   }
   view.reachable = game.reachable(u);
-  view.attackIds = new Set(game.attackTargets(u).map(t => t.id));
+  view.attackIds = new Set(game.attackTargets(u).map(x => x.id));
 }
 
 // --- input: click to select/move/attack, drag to pan, wheel to zoom ---
@@ -117,18 +139,41 @@ function handleClick(hex: Axial) {
   if (game.over) return;
   const sel = selectedUnit();
   const target = game.unitAt(hex);
+  const city = game.cityAt(hex);
   if (sel && target && target.owner === 'barbarian' && view.attackIds.has(target.id)) {
     game.attack(sel, target);
   } else if (sel && view.reachable.has(key(hex))) {
     game.move(sel, hex, view.reachable.get(key(hex))!);
   } else if (target && target.owner === 'player') {
     view.selectedId = target.id;
+    view.selectedCityId = null;
+  } else if (city) {
+    view.selectedCityId = city.id;
+    view.selectedId = null;
   } else {
     view.selectedId = null;
+    view.selectedCityId = null;
   }
   refreshSelection();
   updateUI();
 }
+
+// Action buttons inside the panel (found city / build / choose production).
+panelEl.addEventListener('click', e => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]');
+  if (!btn || game.over) return;
+  const sel = selectedUnit();
+  if (btn.dataset.action === 'found' && sel) {
+    if (game.foundCity(sel)) view.selectedId = null;
+  } else if (btn.dataset.action === 'build' && sel) {
+    game.build(sel);
+  } else if (btn.dataset.action === 'produce') {
+    const c = selectedCity();
+    if (c) game.setProduction(c, btn.dataset.kind as ProducibleKind);
+  }
+  refreshSelection();
+  updateUI();
+});
 
 function endTurn() {
   if (game.over) return;
@@ -137,12 +182,32 @@ function endTurn() {
   updateUI();
 }
 
-document.querySelector('#endturn')!.addEventListener('click', endTurn);
-document.querySelector('#restart')!.addEventListener('click', () => {
+endTurnBtn.addEventListener('click', endTurn);
+techBtn.addEventListener('click', () => {
+  techPanel.classList.toggle('hidden');
+  renderTechPanel();
+});
+
+techPanel.addEventListener('click', e => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-tech]');
+  if (!btn || game.over) return;
+  game.setResearch(btn.dataset.tech as TechId);
+  techPanel.classList.add('hidden');
+  updateUI();
+});
+
+restartBtn.addEventListener('click', () => {
   game = new Game();
   view.selectedId = null;
+  view.selectedCityId = null;
   refreshSelection();
   centerCamera();
+  updateUI();
+});
+
+langSel.addEventListener('change', () => {
+  setLang(langSel.value as Lang);
+  document.documentElement.lang = langSel.value;
   updateUI();
 });
 
@@ -150,6 +215,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Enter') endTurn();
   if (e.key === 'Escape') {
     view.selectedId = null;
+    view.selectedCityId = null;
     refreshSelection();
     updateUI();
   }
@@ -157,15 +223,40 @@ window.addEventListener('keydown', e => {
 
 // --- UI panels ---
 
+function renderTechPanel() {
+  const parts = [`<div class="hint">${t('panel.science', { n: game.scienceYield() })}</div>`];
+  for (const id of game.availableTechs()) {
+    const mark = game.researching === id ? '● ' : '';
+    parts.push(
+      `<button data-tech="${id}">${mark}${t('tech.option', {
+        tech: `tech.${id}`,
+        cost: TECHS[id].cost,
+        turns: game.techTurns(id),
+      })}</button>`,
+      `<div class="hint">${t(`tech.${id}.desc`)}</div>`,
+    );
+  }
+  techPanel.innerHTML = parts.join('');
+}
+
 function updateUI() {
-  turnEl.textContent = `Turn ${game.turn}`;
-  logEl.innerHTML = game.log.slice(-6).map(l => `<div>${l}</div>`).join('');
+  turnEl.textContent = t('turn', { n: game.turn });
+  endTurnBtn.textContent = t('endTurn');
+  restartBtn.textContent = t('newGame');
+  techBtn.textContent = game.researching
+    ? t('research.current', {
+        tech: `tech.${game.researching}`,
+        turns: game.techTurns(game.researching),
+      })
+    : t('research.idle');
+  if (!techPanel.classList.contains('hidden')) renderTechPanel();
+  logEl.innerHTML = game.log
+    .slice(-6)
+    .map(e => `<div>${t(e.key, e.params)}</div>`)
+    .join('');
   if (game.over) {
     bannerEl.classList.remove('hidden');
-    bannerText.textContent =
-      game.over === 'victory'
-        ? '🏆 Victory! Every barbarian camp lies in ashes.'
-        : '💀 Defeat! Your warband has been wiped out.';
+    bannerText.textContent = t(`banner.${game.over}`);
   } else {
     bannerEl.classList.add('hidden');
   }
@@ -176,35 +267,101 @@ function updatePanel() {
   const parts: string[] = [];
   const sel = selectedUnit();
   if (sel) {
+    let stats = t('panel.stats', {
+      hp: sel.hp,
+      maxHp: sel.maxHp,
+      mp: sel.mp,
+      maxMp: sel.maxMp,
+      str: sel.strength,
+    });
+    if (sel.kind === 'builder') {
+      stats += ` · ${t('panel.charges', { n: sel.charges ?? 0 })}`;
+    }
+    parts.push(`<b>${t(sel.nameKey)}</b> — ${stats}`);
+    if (sel.kind === 'settler') {
+      if (game.canFound(sel)) {
+        parts.push(`<button data-action="found">${t('action.foundCity')}</button>`);
+      } else {
+        parts.push(`<span class="hint">${t('reason.tooClose')}</span>`);
+      }
+    } else if (sel.kind === 'builder' && sel.mp > 0) {
+      const improv = game.improvementFor(sel.pos);
+      if (improv && game.canBuildAt(sel.pos)) {
+        parts.push(
+          `<button data-action="build">${t('action.build', { improv: `improv.${improv}` })}</button>`,
+        );
+      } else if (improv) {
+        parts.push(`<span class="hint">${t('reason.outsideTerritory')}</span>`);
+      }
+    }
+    parts.push(`<span class="hint">${t('hint.selected')}</span>`);
+  }
+
+  const selCity = selectedCity();
+  if (selCity) {
+    const { prod, food } = game.cityYields(selCity);
     parts.push(
-      `<b>${sel.icon} ${sel.name}</b> — HP ${sel.hp}/${sel.maxHp} · MP ${sel.mp}/${sel.maxMp} · STR ${sel.strength}`,
+      `<b>${t('city')}</b> — ${t('panel.hp', { hp: selCity.hp, maxHp: selCity.maxHp })} · ${t('panel.pop', { n: selCity.pop })}`,
+    );
+    const growTurns = Math.ceil(
+      Math.max(1, game.growthNeed(selCity) - selCity.food) / food,
     );
     parts.push(
-      `<span class="hint">Click a highlighted hex to move, a red-ringed enemy to attack.</span>`,
+      `${t('panel.cityYields', { prod, food })} · ${t('panel.growth', { turns: growTurns })}`,
     );
+    if (selCity.producing) {
+      const turns = Math.ceil(
+        Math.max(0, PRODUCTION_COST[selCity.producing] - selCity.progress) / prod,
+      );
+      parts.push(t('panel.producing', { item: `unit.${selCity.producing}`, turns }));
+    } else {
+      parts.push(t('panel.chooseProduction'));
+    }
+    for (const kind of PRODUCIBLE) {
+      if (!game.canProduce(kind)) {
+        parts.push(
+          `<button disabled>${t('panel.requires', {
+            item: `unit.${kind}`,
+            tech: `tech.${UNIT_REQUIREMENTS[kind]}`,
+          })}</button>`,
+        );
+        continue;
+      }
+      const cost = PRODUCTION_COST[kind];
+      const turns = Math.ceil(Math.max(1, cost - selCity.progress) / prod);
+      const mark = selCity.producing === kind ? '● ' : '';
+      parts.push(
+        `<button data-action="produce" data-kind="${kind}">${mark}${t('panel.prodOption', { item: `unit.${kind}`, cost, turns })}</button>`,
+      );
+    }
   }
   if (view.hover) {
     const tile = game.world.get(key(view.hover));
     if (tile) {
       const info = TERRAIN_INFO[tile.terrain];
-      const cost = info.moveCost === null ? 'impassable' : `move cost ${info.moveCost}`;
-      parts.push(`${info.name} (${cost})${tile.camp ? ' · ⛺ barbarian camp' : ''}`);
+      const cost =
+        info.moveCost === null ? t('tile.impassable') : t('tile.moveCost', { n: info.moveCost });
+      parts.push(
+        `${t(`terrain.${tile.terrain}`)} (${cost})${tile.camp ? ` · ${t('tile.camp')}` : ''}`,
+      );
       const u = game.unitAt(view.hover);
       if (u && u !== sel) {
-        parts.push(`${u.icon} ${u.name} (${u.owner}) — HP ${u.hp}/${u.maxHp}`);
+        parts.push(
+          `${t(u.nameKey)} (${t(`owner.${u.owner}`)}) — ${t('panel.hp', { hp: u.hp, maxHp: u.maxHp })}`,
+        );
       }
     }
   }
   if (!parts.length) {
-    parts.push(
-      '<span class="hint">Click a unit to select it. Drag to pan, scroll to zoom, Enter ends the turn.</span>',
-    );
+    parts.push(`<span class="hint">${t('hint.idle')}</span>`);
   }
   panelEl.innerHTML = parts.join('<br>');
 }
 
 // --- boot ---
 
+langSel.value = getLang();
+document.documentElement.lang = getLang();
 resize();
 centerCamera();
 updateUI();

@@ -1,22 +1,38 @@
 import { Axial, key, neighbors } from './hex';
 
 export type Terrain = 'water' | 'grass' | 'forest' | 'hills' | 'mountain';
+export type Improvement = 'farm' | 'mine' | 'lumber';
 
 export interface Tile {
   pos: Axial;
   terrain: Terrain;
   camp?: boolean;
+  improvement?: Improvement;
+  /** id of the city whose territory this tile belongs to. */
+  cityId?: number;
 }
 
+// Display names live in i18n.ts under 'improv.<id>' keys.
+// Civ-style yields: farms feed city growth, mines/lumber camps add production.
+export const IMPROVEMENT_INFO: Record<
+  Improvement,
+  { icon: string; prod: number; food: number; terrain: Terrain }
+> = {
+  farm: { icon: '🌾', prod: 0, food: 2, terrain: 'grass' },
+  mine: { icon: '⛏️', prod: 2, food: 0, terrain: 'hills' },
+  lumber: { icon: '🪵', prod: 1, food: 1, terrain: 'forest' },
+};
+
+// Display names live in i18n.ts under 'terrain.<id>' keys.
 export const TERRAIN_INFO: Record<
   Terrain,
-  { name: string; color: string; moveCost: number | null }
+  { color: string; moveCost: number | null }
 > = {
-  water: { name: 'Water', color: '#3d6ea5', moveCost: null },
-  grass: { name: 'Grassland', color: '#7aa651', moveCost: 1 },
-  forest: { name: 'Forest', color: '#4e7a3a', moveCost: 2 },
-  hills: { name: 'Hills', color: '#a08c5a', moveCost: 2 },
-  mountain: { name: 'Mountain', color: '#8a8a8a', moveCost: null },
+  water: { color: '#3d6ea5', moveCost: null },
+  grass: { color: '#7aa651', moveCost: 1 },
+  forest: { color: '#4e7a3a', moveCost: 2 },
+  hills: { color: '#a08c5a', moveCost: 2 },
+  mountain: { color: '#8a8a8a', moveCost: null },
 };
 
 export const MAP_W = 24;
