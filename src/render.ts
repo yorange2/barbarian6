@@ -16,7 +16,13 @@ export interface ViewState {
   selectedCityId: number | null;
   reachable: Map<string, number>;
   attackIds: Set<number>;
+  attackCityIds: Set<number>;
 }
+
+const CIV_COLORS = {
+  player: { unit: '#2f6db3', unitSpent: '#1f4a77', tint: 'rgba(110, 170, 230,', border: '#5f9fdc' },
+  ai: { unit: '#8a4fb0', unitSpent: '#8a4fb0', tint: 'rgba(178, 122, 233,', border: '#a877d6' },
+} as const;
 
 export function render(
   ctx: CanvasRenderingContext2D,
@@ -47,11 +53,10 @@ export function render(
     ctx.lineWidth = 1;
     ctx.stroke();
     if (tile.cityId !== undefined) {
+      const owner = game.cities.find(c => c.id === tile.cityId)?.owner ?? 'player';
+      const alpha = tile.cityId === view.selectedCityId ? '0.32)' : '0.16)';
       pathHex(ctx, x, y);
-      ctx.fillStyle =
-        tile.cityId === view.selectedCityId
-          ? 'rgba(110, 170, 230, 0.32)'
-          : 'rgba(110, 170, 230, 0.16)';
+      ctx.fillStyle = CIV_COLORS[owner].tint + alpha;
       ctx.fill();
     }
     if (tile.hills) {
@@ -73,10 +78,11 @@ export function render(
   }
 
   // Territory borders: draw each edge where ownership changes.
-  ctx.strokeStyle = '#5f9fdc';
   ctx.lineWidth = 2;
   for (const tile of game.world.values()) {
     if (tile.cityId === undefined) continue;
+    const owner = game.cities.find(c => c.id === tile.cityId)?.owner ?? 'player';
+    ctx.strokeStyle = CIV_COLORS[owner].border;
     const { x, y } = axialToPixel(tile.pos, HEX_SIZE);
     const pts = hexCorners(x, y, HEX_SIZE);
     DIRS.forEach((d, i) => {
@@ -94,17 +100,21 @@ export function render(
   for (const city of game.cities) {
     const { x, y } = axialToPixel(city.pos, HEX_SIZE);
     pathHex(ctx, x, y);
-    ctx.fillStyle = 'rgba(47, 109, 179, 0.45)';
+    ctx.fillStyle = CIV_COLORS[city.owner].tint + '0.45)';
     ctx.fill();
-    // Idle cities (no production chosen) get the same gold ring as idle units.
+    // Idle player cities (no production chosen) get the gold ring; enemy
+    // cities in attack range get the red ring.
     if (city.id === view.selectedCityId) {
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 3;
-    } else if (!city.producing) {
+    } else if (view.attackCityIds.has(city.id)) {
+      ctx.strokeStyle = '#ff5533';
+      ctx.lineWidth = 3;
+    } else if (city.owner === 'player' && !city.producing) {
       ctx.strokeStyle = '#ffd75e';
       ctx.lineWidth = 2.5;
     } else {
-      ctx.strokeStyle = '#2f6db3';
+      ctx.strokeStyle = CIV_COLORS[city.owner].unit;
       ctx.lineWidth = 2;
     }
     ctx.stroke();
@@ -133,7 +143,12 @@ export function render(
     ctx.beginPath();
     ctx.arc(x, y, HEX_SIZE * 0.52, 0, Math.PI * 2);
     // Player units that already acted (or stand down) are drawn dimmer.
-    ctx.fillStyle = u.owner === 'player' ? (awake ? '#2f6db3' : '#1f4a77') : '#a83232';
+    ctx.fillStyle =
+      u.owner === 'barbarian'
+        ? '#a83232'
+        : awake || u.owner !== 'player'
+          ? CIV_COLORS[u.owner].unit
+          : CIV_COLORS.player.unitSpent;
     ctx.fill();
     if (u.id === view.selectedId) {
       ctx.strokeStyle = '#ffffff';

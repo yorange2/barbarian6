@@ -11,7 +11,9 @@ import {
   MAP_H,
 } from './map';
 
-export type Owner = 'player' | 'barbarian';
+export type Owner = 'player' | 'ai' | 'barbarian';
+/** Owners that have cities, techs, and an economy. */
+export type CivOwner = 'player' | 'ai';
 
 export type UnitKind =
   | 'warrior'
@@ -107,6 +109,7 @@ export interface Unit {
 
 export interface City {
   id: number;
+  owner: CivOwner;
   pos: Axial;
   hp: number;
   maxHp: number;
@@ -115,6 +118,16 @@ export interface City {
   food: number;
   producing: ProducibleKind | null;
   progress: number;
+}
+
+interface CivState {
+  techs: Set<TechId>;
+  researching: TechId | null;
+  progress: Partial<Record<TechId, number>>;
+}
+
+function newCiv(): CivState {
+  return { techs: new Set(), researching: null, progress: {} };
 }
 
 /** Logs store i18n keys + params, not text, so language switches re-render history. */
@@ -151,10 +164,16 @@ export class Game {
   turn = 1;
   log: LogEntry[] = [];
   over: 'victory' | 'defeat' | null = null;
-  techs = new Set<TechId>();
-  researching: TechId | null = null;
-  private techProgress: Partial<Record<TechId, number>> = {};
+  private civs: Record<CivOwner, CivState> = { player: newCiv(), ai: newCiv() };
   private nextId = 1;
+
+  /** Player-facing views kept for the UI. */
+  get techs(): Set<TechId> {
+    return this.civs.player.techs;
+  }
+  get researching(): TechId | null {
+    return this.civs.player.researching;
+  }
 
   constructor() {
     this.world = generateMap();
@@ -170,8 +189,16 @@ export class Game {
     this.spawnNear('settler', 'player', { q: leftQ, r: midR + 1 });
     this.spawnNear('builder', 'player', { q: leftQ + 1, r: midR - 1 });
 
-    for (const r of [4, MAP_H - 4]) {
-      const q = -Math.floor(r / 2) + MAP_W - 4;
+    // Rival empire starts mirrored on the east side.
+    const aiQ = -Math.floor(midR / 2) + MAP_W - 4;
+    this.spawnNear('warrior', 'ai', { q: aiQ, r: midR });
+    this.spawnNear('warrior', 'ai', { q: aiQ - 1, r: midR });
+    this.spawnNear('settler', 'ai', { q: aiQ, r: midR - 1 });
+    this.spawnNear('builder', 'ai', { q: aiQ - 1, r: midR + 1 });
+
+    // Barbarian camps sit between the two empires, north and south.
+    for (const r of [2, MAP_H - 3]) {
+      const q = -Math.floor(r / 2) + Math.floor(MAP_W / 2);
       const campPos = this.nearestFree({ q, r });
       if (campPos) {
         this.world.get(key(campPos))!.camp = true;
@@ -272,7 +299,7 @@ export class Game {
     unit.pos = dest;
     unit.mp = Math.max(0, unit.mp - cost);
     const tile = this.world.get(key(dest))!;
-    if (tile.camp && unit.owner === 'player') {
+    if (tile.camp && unit.owner !== 'barbarian') {
       tile.camp = false;
       this.log.push({ key: 'log.razed', params: { unit: unit.nameKey } });
       this.checkEnd();
@@ -327,15 +354,31 @@ export class Game {
 
   attackCity(att: Unit, city: City) {
     att.mp = 0;
-    const dmg = this.rollDamage(att.strength, att.hp / att.maxHp, city.strength);
-    city.hp -= dmg;
+    att.sleeping = false;
+    const isRanged = att.rangedStrength !== undefined;
+    const attStr = att.rangedStrength ?? att.strength;
+    const dmg = this.rollDamage(attStr, att.hp / att.maxHp, city.strength);
     this.log.push({ key: 'log.hit', params: { att: att.nameKey, def: 'city', dmg } });
+    // Only melee can take a city; ranged strikes leave it at 1 HP (Civ rule).
+    if (isRanged) {
+      city.hp = Math.max(1, city.hp - dmg);
+      this.checkEnd();
+      return;
+    }
+    city.hp -= dmg;
     if (city.hp <= 0) {
-      this.cities = this.cities.filter(c => c !== city);
-      for (const tile of this.world.values()) {
-        if (tile.cityId === city.id) tile.cityId = undefined;
+      if (att.owner === 'barbarian') {
+        this.cities = this.cities.filter(c => c !== city);
+        for (const tile of this.world.values()) {
+          if (tile.cityId === city.id) tile.cityId = undefined;
+        }
+        this.log.push({ key: 'log.cityRazed' });
+      } else {
+        city.owner = att.owner as CivOwner;
+        city.hp = Math.ceil(city.maxHp / 2);
+        city.producing = null;
+        this.log.push({ key: 'log.cityCaptured', params: { owner: `owner.${att.owner}` } });
       }
-      this.log.push({ key: 'log.cityRazed' });
     } else {
       const back = this.rollDamage(city.strength, city.hp / city.maxHp, att.strength);
       att.hp -= back;
@@ -365,10 +408,12 @@ export class Game {
 
   foundCity(unit: Unit): boolean {
     if (!this.canFound(unit)) return false;
-    const walls = this.techs.has('masonry');
+    const owner = unit.owner as CivOwner;
+    const walls = this.civs[owner].techs.has('masonry');
     const hp = CITY_HP + (walls ? WALL_HP : 0);
     const city: City = {
       id: this.nextId++,
+      owner,
       pos: unit.pos,
       hp,
       maxHp: hp,
@@ -381,7 +426,7 @@ export class Game {
     this.cities.push(city);
     this.claimTerritory(city, this.radiusForPop(city.pop));
     this.units = this.units.filter(u => u !== unit);
-    this.log.push({ key: 'log.cityFounded' });
+    this.log.push({ key: 'log.cityFounded', params: { owner: `owner.${owner}` } });
     return true;
   }
 
@@ -401,13 +446,13 @@ export class Game {
 
   // --- builder: improve tiles ---
 
-  improvementFor(pos: Axial): Improvement | null {
+  improvementFor(pos: Axial, owner: CivOwner = 'player'): Improvement | null {
     const tile = this.world.get(key(pos));
     if (!tile || tile.improvement || !this.passable(tile)) return null;
     // Lumber camps go on woods; other features must be cleared first.
     if (tile.feature === 'woods') return 'lumber';
     if (tile.feature) return null;
-    if (tile.hills) return this.techs.has('mining') ? 'mine' : null;
+    if (tile.hills) return this.civs[owner].techs.has('mining') ? 'mine' : null;
     if (tile.terrain === 'grassland' || tile.terrain === 'plains') return 'farm';
     return null;
   }
@@ -426,7 +471,7 @@ export class Game {
   chop(unit: Unit): boolean {
     if (unit.kind !== 'builder' || !unit.charges) return false;
     const removal = this.removalFor(unit.pos);
-    if (!removal || !this.canBuildAt(unit.pos)) return false;
+    if (!removal || !this.canBuildAt(unit.pos, unit.owner as CivOwner)) return false;
     const tile = this.world.get(key(unit.pos))!;
     const feature = tile.feature!;
     tile.feature = undefined;
@@ -450,15 +495,18 @@ export class Game {
     return true;
   }
 
-  /** Improvements may only be built inside your own territory. */
-  canBuildAt(pos: Axial): boolean {
-    return this.world.get(key(pos))?.cityId !== undefined;
+  /** Improvements may only be built inside the owner's own territory. */
+  canBuildAt(pos: Axial, owner: CivOwner = 'player'): boolean {
+    const id = this.world.get(key(pos))?.cityId;
+    if (id === undefined) return false;
+    return this.cities.find(c => c.id === id)?.owner === owner;
   }
 
   build(unit: Unit): boolean {
     if (unit.kind !== 'builder' || !unit.charges) return false;
-    const improv = this.improvementFor(unit.pos);
-    if (!improv || !this.canBuildAt(unit.pos)) return false;
+    const owner = unit.owner as CivOwner;
+    const improv = this.improvementFor(unit.pos, owner);
+    if (!improv || !this.canBuildAt(unit.pos, owner)) return false;
     this.world.get(key(unit.pos))!.improvement = improv;
     unit.charges--;
     unit.mp = 0;
@@ -472,13 +520,13 @@ export class Game {
 
   // --- cities: growth and production ---
 
-  canProduce(kind: ProducibleKind): boolean {
+  canProduce(kind: ProducibleKind, owner: CivOwner = 'player'): boolean {
     const req = UNIT_REQUIREMENTS[kind];
-    return !req || this.techs.has(req);
+    return !req || this.civs[owner].techs.has(req);
   }
 
   setProduction(city: City, kind: ProducibleKind) {
-    if (this.canProduce(kind)) city.producing = kind;
+    if (this.canProduce(kind, city.owner)) city.producing = kind;
   }
 
   /**
@@ -504,27 +552,30 @@ export class Game {
 
   // --- research ---
 
-  scienceYield(): number {
+  scienceYield(owner: CivOwner = 'player'): number {
     let s = BASE_SCIENCE;
-    for (const c of this.cities) s += 1 + c.pop;
+    for (const c of this.cities) {
+      if (c.owner === owner) s += 1 + c.pop;
+    }
     return s;
   }
 
-  availableTechs(): TechId[] {
+  availableTechs(owner: CivOwner = 'player'): TechId[] {
+    const techs = this.civs[owner].techs;
     return (Object.keys(TECHS) as TechId[]).filter(id => {
-      if (this.techs.has(id)) return false;
+      if (techs.has(id)) return false;
       const req = TECHS[id].requires;
-      return !req || this.techs.has(req);
+      return !req || techs.has(req);
     });
   }
 
   setResearch(id: TechId) {
-    if (this.availableTechs().includes(id)) this.researching = id;
+    if (this.availableTechs('player').includes(id)) this.civs.player.researching = id;
   }
 
   techTurns(id: TechId): number {
-    const remaining = TECHS[id].cost - (this.techProgress[id] ?? 0);
-    return Math.max(1, Math.ceil(remaining / this.scienceYield()));
+    const remaining = TECHS[id].cost - (this.civs.player.progress[id] ?? 0);
+    return Math.max(1, Math.ceil(remaining / this.scienceYield('player')));
   }
 
   // --- turn cycle ---
@@ -532,6 +583,7 @@ export class Game {
   endTurn() {
     if (this.over) return;
     this.barbarianTurn();
+    this.aiTurn();
     this.turn++;
     if (this.turn % SPAWN_EVERY === 0) this.spawnFromCamps();
 
@@ -543,38 +595,47 @@ export class Game {
         city.food -= this.growthNeed(city);
         const oldRadius = this.radiusForPop(city.pop);
         city.pop++;
-        this.log.push({ key: 'log.growth', params: { n: city.pop } });
+        if (city.owner === 'player') {
+          this.log.push({ key: 'log.growth', params: { n: city.pop } });
+        }
         const newRadius = this.radiusForPop(city.pop);
         if (newRadius > oldRadius) {
           this.claimTerritory(city, newRadius);
-          this.log.push({ key: 'log.borders' });
+          if (city.owner === 'player') this.log.push({ key: 'log.borders' });
         }
       }
       if (city.producing) {
         city.progress += prod;
         const cost = PRODUCTION_COST[city.producing];
         if (city.progress >= cost) {
-          this.spawnNear(city.producing, 'player', city.pos);
-          this.log.push({
-            key: 'log.produced',
-            params: { item: `unit.${city.producing}` },
-          });
+          this.spawnNear(city.producing, city.owner, city.pos);
+          if (city.owner === 'player') {
+            this.log.push({
+              key: 'log.produced',
+              params: { item: `unit.${city.producing}` },
+            });
+          }
           city.progress -= cost;
           city.producing = null;
         }
       }
     }
 
-    if (this.researching) {
-      const id = this.researching;
-      const p = (this.techProgress[id] ?? 0) + this.scienceYield();
-      this.techProgress[id] = p;
+    for (const owner of ['player', 'ai'] as const) {
+      const civ = this.civs[owner];
+      if (!civ.researching) continue;
+      const id = civ.researching;
+      const p = (civ.progress[id] ?? 0) + this.scienceYield(owner);
+      civ.progress[id] = p;
       if (p >= TECHS[id].cost) {
-        this.techs.add(id);
-        this.researching = null;
-        this.log.push({ key: 'log.research', params: { tech: `tech.${id}` } });
+        civ.techs.add(id);
+        civ.researching = null;
+        if (owner === 'player') {
+          this.log.push({ key: 'log.research', params: { tech: `tech.${id}` } });
+        }
         if (id === 'masonry') {
           for (const c of this.cities) {
+            if (c.owner !== owner) continue;
             c.maxHp += WALL_HP;
             c.hp += WALL_HP;
             c.strength += WALL_STRENGTH;
@@ -605,7 +666,7 @@ export class Game {
     for (const barb of [...this.units]) {
       if (barb.owner !== 'barbarian' || barb.hp <= 0) continue;
       const targetPositions = [
-        ...this.units.filter(u => u.owner === 'player').map(u => u.pos),
+        ...this.units.filter(u => u.owner !== 'barbarian').map(u => u.pos),
         ...this.cities.map(c => c.pos),
       ];
       if (!targetPositions.length) return;
@@ -652,6 +713,168 @@ export class Game {
     }
   }
 
+  // --- rival empire AI ---
+
+  private aiTurn() {
+    // Cities: pick production; research: grab the first available tech.
+    for (const city of this.cities) {
+      if (city.owner === 'ai' && !city.producing) {
+        city.producing = this.aiChooseProduction();
+      }
+    }
+    if (!this.civs.ai.researching) {
+      const avail = this.availableTechs('ai');
+      if (avail.length) this.civs.ai.researching = avail[0];
+    }
+    for (const u of [...this.units]) {
+      if (u.owner !== 'ai' || u.hp <= 0) continue;
+      if (u.kind === 'settler') this.aiSettler(u);
+      else if (u.kind === 'builder') this.aiBuilder(u);
+      else this.aiMilitary(u);
+    }
+  }
+
+  private aiChooseProduction(): ProducibleKind | null {
+    const aiUnits = this.units.filter(u => u.owner === 'ai');
+    const aiCities = this.cities.filter(c => c.owner === 'ai');
+    const military = aiUnits.filter(u => u.strength > 0).length;
+    const builders = aiUnits.filter(u => u.kind === 'builder').length;
+    if (builders < 1 && Math.random() < 0.5) return 'builder';
+    if (aiCities.length < 3 && !aiUnits.some(u => u.kind === 'settler') && military >= 2) {
+      return 'settler';
+    }
+    // Army cap keeps the AI from drowning the map in units.
+    if (military >= 4 + 2 * aiCities.length) {
+      return builders < 2 ? 'builder' : null;
+    }
+    if (this.canProduce('archer', 'ai') && Math.random() < 0.35) return 'archer';
+    if (this.canProduce('horseman', 'ai') && Math.random() < 0.3) return 'horseman';
+    if (this.canProduce('spearman', 'ai')) return 'spearman';
+    return 'warrior';
+  }
+
+  private aiSettler(u: Unit) {
+    if (this.canFound(u)) {
+      this.foundCity(u);
+      return;
+    }
+    // Walk toward open land: maximize distance to the nearest existing city.
+    const score = (p: Axial) => {
+      let m = Infinity;
+      for (const c of this.cities) m = Math.min(m, distance(p, c.pos));
+      return Math.min(m, 5);
+    };
+    const options = this.reachable(u);
+    let best: Axial | null = null;
+    let bestS = score(u.pos);
+    for (const k of options.keys()) {
+      const s = score(fromKey(k));
+      if (s > bestS) {
+        bestS = s;
+        best = fromKey(k);
+      }
+    }
+    if (best) {
+      this.move(u, best, options.get(key(best))!);
+      if (this.canFound(u)) this.foundCity(u);
+    }
+  }
+
+  private aiBuilder(u: Unit) {
+    if (this.canBuildAt(u.pos, 'ai') && this.improvementFor(u.pos, 'ai')) {
+      this.build(u);
+      return;
+    }
+    // Head for the nearest improvable tile in AI territory.
+    const spots: Axial[] = [];
+    for (const tile of this.world.values()) {
+      if (
+        this.canBuildAt(tile.pos, 'ai') &&
+        this.improvementFor(tile.pos, 'ai') &&
+        !this.unitAt(tile.pos)
+      ) {
+        spots.push(tile.pos);
+      }
+    }
+    if (!spots.length) return;
+    let goal = spots[0];
+    for (const p of spots) {
+      if (distance(u.pos, p) < distance(u.pos, goal)) goal = p;
+    }
+    const options = this.reachable(u);
+    let best: Axial | null = null;
+    let bestD = distance(u.pos, goal);
+    for (const k of options.keys()) {
+      const d = distance(fromKey(k), goal);
+      if (d < bestD) {
+        bestD = d;
+        best = fromKey(k);
+      }
+    }
+    if (best) {
+      this.move(u, best, options.get(key(best))!);
+      if (this.canBuildAt(u.pos, 'ai') && this.improvementFor(u.pos, 'ai')) this.build(u);
+    }
+  }
+
+  private aiMilitary(u: Unit) {
+    const hostileCities = () => this.cities.filter(c => c.owner !== 'ai');
+    const tryAttack = (): boolean => {
+      const targets = this.attackTargets(u);
+      if (targets.length) {
+        targets.sort((a, b) => a.hp - b.hp);
+        this.attack(u, targets[0]);
+        return true;
+      }
+      if (u.mp > 0) {
+        const range = u.range ?? 1;
+        const city = hostileCities().find(c => distance(c.pos, u.pos) <= range);
+        if (city) {
+          this.attackCity(u, city);
+          return true;
+        }
+      }
+      return false;
+    };
+    if (tryAttack()) return;
+
+    const targetPositions = [
+      ...this.units.filter(x => x.owner !== 'ai').map(x => x.pos),
+      ...hostileCities().map(c => c.pos),
+      ...[...this.world.values()].filter(t => t.camp).map(t => t.pos),
+    ];
+    let goal: Axial | null = null;
+    for (const p of targetPositions) {
+      if (!goal || distance(u.pos, p) < distance(u.pos, goal)) goal = p;
+    }
+    if (goal && distance(u.pos, goal) > AGGRO_RANGE) {
+      // Nothing near: fall back toward the closest AI city.
+      const own = this.cities.filter(c => c.owner === 'ai');
+      if (!own.length) return;
+      let home = own[0].pos;
+      for (const c of own) {
+        if (distance(u.pos, c.pos) < distance(u.pos, home)) home = c.pos;
+      }
+      if (distance(u.pos, home) <= 2) return;
+      goal = home;
+    }
+    if (!goal) return;
+    const options = this.reachable(u);
+    let best: Axial | null = null;
+    let bestD = distance(u.pos, goal);
+    for (const k of options.keys()) {
+      const d = distance(fromKey(k), goal);
+      if (d < bestD) {
+        bestD = d;
+        best = fromKey(k);
+      }
+    }
+    if (best) {
+      this.move(u, best, options.get(key(best))!);
+      tryAttack();
+    }
+  }
+
   private spawnFromCamps() {
     const count = this.units.filter(u => u.owner === 'barbarian').length;
     if (count >= MAX_BARBARIANS) return;
@@ -664,12 +887,19 @@ export class Game {
 
   private checkEnd() {
     if (this.over) return;
-    if (!this.units.some(u => u.owner === 'player') && !this.cities.length) {
+    const playerAlive =
+      this.units.some(u => u.owner === 'player') ||
+      this.cities.some(c => c.owner === 'player');
+    if (!playerAlive) {
       this.over = 'defeat';
       return;
     }
-    const camps = [...this.world.values()].some(t => t.camp);
-    const barbs = this.units.some(u => u.owner === 'barbarian');
-    if (!camps && !barbs) this.over = 'victory';
+    const barbsGone =
+      ![...this.world.values()].some(t => t.camp) &&
+      !this.units.some(u => u.owner === 'barbarian');
+    const aiGone =
+      !this.units.some(u => u.owner === 'ai') &&
+      !this.cities.some(c => c.owner === 'ai');
+    if (barbsGone && aiGone) this.over = 'victory';
   }
 }

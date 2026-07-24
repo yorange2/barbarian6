@@ -11,7 +11,7 @@ import {
   TechId,
 } from './game';
 import { render, HEX_SIZE, Cam, ViewState } from './render';
-import { Axial, key, pixelToAxial, axialToPixel } from './hex';
+import { Axial, key, pixelToAxial, axialToPixel, distance } from './hex';
 import { tileYields, tileMoveCost, tileDefense } from './map';
 import { t, getLang, setLang, Lang } from './i18n';
 
@@ -36,6 +36,7 @@ const view: ViewState = {
   selectedCityId: null,
   reachable: new Map(),
   attackIds: new Set(),
+  attackCityIds: new Set(),
 };
 
 function centerCamera() {
@@ -107,7 +108,9 @@ function unitPending(u: Unit): boolean {
 function pendingEntries(): PendingEntry[] {
   return [
     ...game.units.filter(unitPending).map(u => ({ id: u.id, unit: u })),
-    ...game.cities.filter(c => !c.producing).map(c => ({ id: c.id, city: c })),
+    ...game.cities
+      .filter(c => c.owner === 'player' && !c.producing)
+      .map(c => ({ id: c.id, city: c })),
   ].sort((a, b) => a.id - b.id);
 }
 
@@ -144,16 +147,26 @@ function advanceSelection() {
 }
 
 function refreshSelection() {
-  if (!selectedCity()) view.selectedCityId = null;
+  const sc = selectedCity();
+  if (!sc || sc.owner !== 'player') view.selectedCityId = null;
   const u = selectedUnit();
   if (!u || u.owner !== 'player') {
     view.selectedId = null;
     view.reachable = new Map();
     view.attackIds = new Set();
+    view.attackCityIds = new Set();
     return;
   }
   view.reachable = game.reachable(u);
   view.attackIds = new Set(game.attackTargets(u).map(x => x.id));
+  const range = u.range ?? 1;
+  view.attackCityIds = new Set(
+    u.mp > 0 && u.strength > 0
+      ? game.cities
+          .filter(c => c.owner !== 'player' && distance(c.pos, u.pos) <= range)
+          .map(c => c.id)
+      : [],
+  );
 }
 
 // --- input: click to select/move/attack, drag to pan, wheel to zoom ---
@@ -235,8 +248,12 @@ function handleClick(hex: Axial) {
   const target = game.unitAt(hex);
   const city = game.cityAt(hex);
   let acted = false;
-  if (sel && target && target.owner === 'barbarian' && view.attackIds.has(target.id)) {
+  if (sel && target && target.owner !== 'player' && view.attackIds.has(target.id)) {
     game.attack(sel, target);
+    advanceSelection();
+    acted = true;
+  } else if (sel && city && view.attackCityIds.has(city.id)) {
+    game.attackCity(sel, city);
     advanceSelection();
     acted = true;
   } else if (sel && view.reachable.has(key(hex))) {
@@ -246,7 +263,7 @@ function handleClick(hex: Axial) {
   } else if (target && target.owner === 'player') {
     view.selectedId = target.id;
     view.selectedCityId = null;
-  } else if (city) {
+  } else if (city && city.owner === 'player') {
     view.selectedCityId = city.id;
     view.selectedId = null;
   } else {
@@ -421,7 +438,7 @@ function renderTechPanel() {
 function updateUI() {
   turnEl.textContent = t('turn', { n: game.turn });
   const pendingUnits = game.units.filter(unitPending).length;
-  const idleCities = game.cities.filter(c => !c.producing).length;
+  const idleCities = game.cities.filter(c => c.owner === 'player' && !c.producing).length;
   if (pendingUnits > 0) {
     endTurnBtn.textContent = t('endTurn.units', { n: pendingUnits });
     endTurnBtn.classList.add('warn');
@@ -569,6 +586,12 @@ function updatePanel() {
       if (defn !== 0) bits.push(t('tile.defense', { n: (defn > 0 ? '+' : '') + defn }));
       parts.push(`<span class="hint">${bits.join(' · ')}</span>`);
 
+      const hc = game.cityAt(view.hover);
+      if (hc) {
+        parts.push(
+          `${t('city')} (${t(`owner.${hc.owner}`)}) — ${t('panel.hp', { hp: hc.hp, maxHp: hc.maxHp })}`,
+        );
+      }
       const u = game.unitAt(view.hover);
       if (u && u !== sel) {
         parts.push(

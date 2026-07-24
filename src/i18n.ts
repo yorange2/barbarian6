@@ -12,7 +12,7 @@ const dictionaries: Record<Lang, Record<string, string>> = {
     'endTurn.research': '⚠️ Choose research',
     'endTurn.force': 'Press Enter to end the turn anyway',
     'newGame': 'New Game',
-    'banner.victory': '🏆 Victory! Every barbarian camp lies in ashes.',
+    'banner.victory': '🏆 Victory! The barbarians and the rival empire are no more.',
     'banner.defeat': '💀 Defeat! Your warband has been wiped out.',
 
     'unit.warrior': '⚔️ Warrior',
@@ -25,6 +25,7 @@ const dictionaries: Record<Lang, Record<string, string>> = {
     'unit.barbarian': '🪓 Barbarian',
     'city': '🏛️ City',
     'owner.player': 'player',
+    'owner.ai': 'rival empire',
     'owner.barbarian': 'barbarian',
 
     'improv.farm': '🌾 Farm',
@@ -93,7 +94,8 @@ const dictionaries: Record<Lang, Record<string, string>> = {
     'log.retaliate': '{def} strikes back for {dmg}.',
     'log.dies': '{unit} dies!',
     'log.spawn': '⛺ A new barbarian emerges from a camp!',
-    'log.cityFounded': '🏛️ A new city has been founded!',
+    'log.cityFounded': '🏛️ The {owner} founded a new city!',
+    'log.cityCaptured': '🏛️ A city was captured by the {owner}!',
     'log.built': '{unit} built {improv}.',
     'log.produced': '🏛️ The city finished {item}.',
     'log.cityRazed': '🔥 A city was razed by barbarians!',
@@ -112,7 +114,7 @@ const dictionaries: Record<Lang, Record<string, string>> = {
     'endTurn.research': '⚠️ 待选科技',
     'endTurn.force': '按回车可直接结束回合',
     'newGame': '新游戏',
-    'banner.victory': '🏆 胜利！所有蛮族营地已化为灰烬。',
+    'banner.victory': '🏆 胜利！蛮族与敌对文明都已覆灭。',
     'banner.defeat': '💀 战败！你的战团全军覆没。',
 
     'unit.warrior': '⚔️ 勇士',
@@ -125,6 +127,7 @@ const dictionaries: Record<Lang, Record<string, string>> = {
     'unit.barbarian': '🪓 蛮族战士',
     'city': '🏛️ 城市',
     'owner.player': '玩家',
+    'owner.ai': '敌对文明',
     'owner.barbarian': '蛮族',
 
     'improv.farm': '🌾 农场',
@@ -193,7 +196,8 @@ const dictionaries: Record<Lang, Record<string, string>> = {
     'log.retaliate': '{def} 反击，造成 {dmg} 点伤害。',
     'log.dies': '{unit} 阵亡！',
     'log.spawn': '⛺ 营地中又出现了一个蛮族战士！',
-    'log.cityFounded': '🏛️ 一座新城市建立了！',
+    'log.cityFounded': '🏛️ {owner}建立了一座新城市！',
+    'log.cityCaptured': '🏛️ 一座城市被{owner}占领了！',
     'log.built': '{unit} 建造了{improv}。',
     'log.produced': '🏛️ 城市完成了 {item} 的生产。',
     'log.cityRazed': '🔥 一座城市被蛮族夷为平地！',
