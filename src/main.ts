@@ -59,6 +59,7 @@ function resize() {
   canvas.height = canvas.clientHeight * dpr;
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', resize);
 
 function screenToHex(sx: number, sy: number): Axial {
   const rect = canvas.getBoundingClientRect();
@@ -201,21 +202,108 @@ window.addEventListener('mouseup', e => {
   dragStart = null;
 });
 
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 2.5;
+
+/** Zoom to `newZoom` while keeping the world point under (screenX, screenY) fixed. */
+function zoomAround(screenX: number, screenY: number, newZoom: number) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = screenX - rect.left - rect.width / 2;
+  const sy = screenY - rect.top - rect.height / 2;
+  const wx = sx / cam.zoom + cam.x;
+  const wy = sy / cam.zoom + cam.y;
+  cam.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, newZoom));
+  cam.x = wx - sx / cam.zoom;
+  cam.y = wy - sy / cam.zoom;
+}
+
 canvas.addEventListener(
   'wheel',
   e => {
     e.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left - rect.width / 2;
-    const sy = e.clientY - rect.top - rect.height / 2;
-    const wx = sx / cam.zoom + cam.x;
-    const wy = sy / cam.zoom + cam.y;
-    cam.zoom = Math.min(2.5, Math.max(0.4, cam.zoom * Math.exp(-e.deltaY * 0.0012)));
-    cam.x = wx - sx / cam.zoom;
-    cam.y = wy - sy / cam.zoom;
+    zoomAround(e.clientX, e.clientY, cam.zoom * Math.exp(-e.deltaY * 0.0012));
   },
   { passive: false },
 );
+
+// --- touch: one finger pans/taps, two fingers pinch-zoom ---
+
+const TAP_SLOP = 10; // px of movement still counted as a tap, not a drag
+let touchLast: { x: number; y: number } | null = null;
+let touchStart: { x: number; y: number } | null = null;
+let touchMoved = false;
+let pinchDist = 0;
+let pinchMid: { x: number; y: number } | null = null;
+
+const touchDist = (a: Touch, b: Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+const touchMid = (a: Touch, b: Touch) => ({
+  x: (a.clientX + b.clientX) / 2,
+  y: (a.clientY + b.clientY) / 2,
+});
+
+canvas.addEventListener(
+  'touchstart',
+  e => {
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      const p = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      touchLast = p;
+      touchStart = p;
+      touchMoved = false;
+    } else if (e.touches.length === 2) {
+      touchLast = null;
+      touchMoved = true; // a pinch is never a tap
+      pinchDist = touchDist(e.touches[0], e.touches[1]);
+      pinchMid = touchMid(e.touches[0], e.touches[1]);
+    }
+  },
+  { passive: false },
+);
+
+canvas.addEventListener(
+  'touchmove',
+  e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && touchLast && touchStart) {
+      const t0 = e.touches[0];
+      if (!touchMoved && Math.hypot(t0.clientX - touchStart.x, t0.clientY - touchStart.y) > TAP_SLOP) {
+        touchMoved = true;
+      }
+      if (touchMoved) {
+        cam.x -= (t0.clientX - touchLast.x) / cam.zoom;
+        cam.y -= (t0.clientY - touchLast.y) / cam.zoom;
+      }
+      touchLast = { x: t0.clientX, y: t0.clientY };
+    } else if (e.touches.length === 2) {
+      const d = touchDist(e.touches[0], e.touches[1]);
+      const m = touchMid(e.touches[0], e.touches[1]);
+      if (pinchDist > 0) zoomAround(m.x, m.y, cam.zoom * (d / pinchDist));
+      if (pinchMid) {
+        cam.x -= (m.x - pinchMid.x) / cam.zoom;
+        cam.y -= (m.y - pinchMid.y) / cam.zoom;
+      }
+      pinchDist = d;
+      pinchMid = m;
+    }
+  },
+  { passive: false },
+);
+
+canvas.addEventListener('touchend', e => {
+  if (e.touches.length === 0) {
+    if (!touchMoved && touchStart) handleClick(screenToHex(touchStart.x, touchStart.y));
+    touchLast = null;
+    touchStart = null;
+    pinchDist = 0;
+    pinchMid = null;
+  } else if (e.touches.length === 1) {
+    // Lifted one finger of a pinch — keep panning with the remaining one.
+    touchLast = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    touchMoved = true;
+    pinchDist = 0;
+    pinchMid = null;
+  }
+});
 
 /** Research counts as awaiting orders when idle and something is researchable. */
 function researchPending(): boolean {
