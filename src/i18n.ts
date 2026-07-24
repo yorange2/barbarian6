@@ -7,6 +7,9 @@ const dictionaries: Record<Lang, Record<string, string>> = {
   en: {
     'turn': 'Turn {n}',
     'endTurn': 'End Turn ⏭',
+    'endTurn.units': '⚠️ Units awaiting orders ({n})',
+    'endTurn.city': '⚠️ Choose city production',
+    'endTurn.force': 'Press Enter to end the turn anyway',
     'newGame': 'New Game',
     'banner.victory': '🏆 Victory! Every barbarian camp lies in ashes.',
     'banner.defeat': '💀 Defeat! Your warband has been wiped out.',
@@ -84,6 +87,9 @@ const dictionaries: Record<Lang, Record<string, string>> = {
   zh: {
     'turn': '第 {n} 回合',
     'endTurn': '结束回合 ⏭',
+    'endTurn.units': '⚠️ 单位待命（{n}）',
+    'endTurn.city': '⚠️ 城市待选生产',
+    'endTurn.force': '按回车可直接结束回合',
     'newGame': '新游戏',
     'banner.victory': '🏆 胜利！所有蛮族营地已化为灰烬。',
     'banner.defeat': '💀 战败！你的战团全军覆没。',

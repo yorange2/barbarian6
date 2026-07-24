@@ -92,22 +92,52 @@ function ensureVisible(pos: Axial) {
   }
 }
 
-/** After a unit finishes acting, jump to the next player unit with moves left. */
+interface PendingEntry {
+  id: number;
+  unit?: Unit;
+  city?: City;
+}
+
+/** Everything still awaiting orders: units with moves left, cities without production. */
+function pendingEntries(): PendingEntry[] {
+  return [
+    ...game.units
+      .filter(u => u.owner === 'player' && u.mp > 0)
+      .map(u => ({ id: u.id, unit: u })),
+    ...game.cities.filter(c => !c.producing).map(c => ({ id: c.id, city: c })),
+  ].sort((a, b) => a.id - b.id);
+}
+
+function selectEntry(e: PendingEntry) {
+  view.selectedId = e.unit?.id ?? null;
+  view.selectedCityId = e.city?.id ?? null;
+  ensureVisible((e.unit ?? e.city!).pos);
+}
+
+/** Cycle to the next pending item, even if the current selection still has orders. */
+function focusNext() {
+  const entries = pendingEntries();
+  if (!entries.length) return;
+  const prevId = view.selectedId ?? view.selectedCityId ?? -1;
+  selectEntry(entries.find(e => e.id > prevId) ?? entries[0]);
+}
+
+/**
+ * Jump to the next thing awaiting orders. Stays put if the current selection
+ * still needs orders itself.
+ */
 function advanceSelection() {
-  const cur = selectedUnit();
-  if (cur && cur.mp > 0) return;
-  const candidates = game.units
-    .filter(u => u.owner === 'player' && u.mp > 0)
-    .sort((a, b) => a.id - b.id);
-  if (!candidates.length) {
+  const curUnit = selectedUnit();
+  if (curUnit && curUnit.mp > 0) return;
+  const curCity = selectedCity();
+  if (curCity && !curCity.producing) return;
+  const entries = pendingEntries();
+  if (!entries.length) {
     view.selectedId = null;
     return;
   }
-  const prevId = view.selectedId ?? -1;
-  const next = candidates.find(u => u.id > prevId) ?? candidates[0];
-  view.selectedId = next.id;
-  view.selectedCityId = null;
-  ensureVisible(next.pos);
+  const prevId = view.selectedId ?? view.selectedCityId ?? -1;
+  selectEntry(entries.find(e => e.id > prevId) ?? entries[0]);
 }
 
 function refreshSelection() {
@@ -207,7 +237,10 @@ panelEl.addEventListener('click', e => {
     if (game.build(sel)) advanceSelection();
   } else if (btn.dataset.action === 'produce') {
     const c = selectedCity();
-    if (c) game.setProduction(c, btn.dataset.kind as ProducibleKind);
+    if (c) {
+      game.setProduction(c, btn.dataset.kind as ProducibleKind);
+      advanceSelection();
+    }
   }
   refreshSelection();
   updateUI();
@@ -216,12 +249,22 @@ panelEl.addEventListener('click', e => {
 function endTurn() {
   if (game.over) return;
   game.endTurn();
-  if (!selectedCity()) advanceSelection();
+  advanceSelection();
   refreshSelection();
   updateUI();
 }
 
-endTurnBtn.addEventListener('click', endTurn);
+// Civ-style: while anything awaits orders, the button jumps to it instead of
+// ending the turn. Enter always force-ends the turn.
+endTurnBtn.addEventListener('click', () => {
+  if (!game.over && pendingEntries().length) {
+    focusNext();
+    refreshSelection();
+    updateUI();
+    return;
+  }
+  endTurn();
+});
 techBtn.addEventListener('click', () => {
   techPanel.classList.toggle('hidden');
   renderTechPanel();
@@ -239,8 +282,9 @@ restartBtn.addEventListener('click', () => {
   game = new Game();
   view.selectedId = null;
   view.selectedCityId = null;
-  refreshSelection();
   centerCamera();
+  advanceSelection();
+  refreshSelection();
   updateUI();
 });
 
@@ -280,7 +324,21 @@ function renderTechPanel() {
 
 function updateUI() {
   turnEl.textContent = t('turn', { n: game.turn });
-  endTurnBtn.textContent = t('endTurn');
+  const pendingUnits = game.units.filter(u => u.owner === 'player' && u.mp > 0).length;
+  const idleCities = game.cities.filter(c => !c.producing).length;
+  if (pendingUnits > 0) {
+    endTurnBtn.textContent = t('endTurn.units', { n: pendingUnits });
+    endTurnBtn.classList.add('warn');
+    endTurnBtn.title = t('endTurn.force');
+  } else if (idleCities > 0) {
+    endTurnBtn.textContent = t('endTurn.city');
+    endTurnBtn.classList.add('warn');
+    endTurnBtn.title = t('endTurn.force');
+  } else {
+    endTurnBtn.textContent = t('endTurn');
+    endTurnBtn.classList.remove('warn');
+    endTurnBtn.title = '';
+  }
   restartBtn.textContent = t('newGame');
   techBtn.textContent = game.researching
     ? t('research.current', {
@@ -403,6 +461,8 @@ langSel.value = getLang();
 document.documentElement.lang = getLang();
 resize();
 centerCamera();
+advanceSelection();
+refreshSelection();
 updateUI();
 
 function frame() {

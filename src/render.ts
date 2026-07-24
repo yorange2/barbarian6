@@ -86,8 +86,17 @@ export function render(
     pathHex(ctx, x, y);
     ctx.fillStyle = 'rgba(47, 109, 179, 0.45)';
     ctx.fill();
-    ctx.strokeStyle = city.id === view.selectedCityId ? '#ffffff' : '#2f6db3';
-    ctx.lineWidth = city.id === view.selectedCityId ? 3 : 2;
+    // Idle cities (no production chosen) get the same gold ring as idle units.
+    if (city.id === view.selectedCityId) {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 3;
+    } else if (!city.producing) {
+      ctx.strokeStyle = '#ffd75e';
+      ctx.lineWidth = 2.5;
+    } else {
+      ctx.strokeStyle = '#2f6db3';
+      ctx.lineWidth = 2;
+    }
     ctx.stroke();
     glyph(ctx, x, y, '🏛️', HEX_SIZE * 0.8);
     drawHpBar(ctx, x, y, city.hp / city.maxHp);

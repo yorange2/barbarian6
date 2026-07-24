@@ -168,3 +168,12 @@ button {
 button:hover {
   background: #cc8a3a;
 }
+
+#endturn.warn {
+  background: #c9962e;
+  box-shadow: 0 0 8px rgba(255, 215, 94, 0.5);
+}
+
+#endturn.warn:hover {
+  background: #dba93a;
+}
