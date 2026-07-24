@@ -10,6 +10,12 @@ const dictionaries: Record<Lang, Record<string, string>> = {
     'endTurn.units': '⚠️ Units awaiting orders ({n})',
     'endTurn.city': '⚠️ Choose city production',
     'endTurn.research': '⚠️ Choose research',
+    // Compact labels for narrow screens (emoji + number, language-neutral).
+    'endTurn.units.short': '⚠️ {n} ⚑',
+    'endTurn.city.short': '⚠️ 🏛️',
+    'endTurn.research.short': '⚠️ 🧪',
+    'research.current.short': '🧪 {turns}',
+    'research.idle.short': '🧪 +',
     'endTurn.force': 'Press Enter to end the turn anyway',
     'newGame': 'New Game',
     'banner.victory': '🏆 Victory! The barbarians and the rival empire are no more.',

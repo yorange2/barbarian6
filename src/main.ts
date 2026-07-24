@@ -28,6 +28,8 @@ const langSel = document.querySelector<HTMLSelectElement>('#lang')!;
 const techBtn = document.querySelector<HTMLButtonElement>('#techbtn')!;
 const techPanel = document.querySelector<HTMLDivElement>('#techpanel')!;
 
+const narrowMq = window.matchMedia('(max-width: 640px)');
+
 let game = new Game();
 const cam: Cam = { x: 0, y: 0, zoom: 1 };
 const view: ViewState = {
@@ -60,6 +62,8 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', resize);
+// Relabel the top-bar buttons (full vs. compact) when crossing the breakpoint.
+narrowMq.addEventListener('change', () => updateUI());
 
 function screenToHex(sx: number, sy: number): Axial {
   const rect = canvas.getBoundingClientRect();
@@ -525,18 +529,20 @@ function renderTechPanel() {
 
 function updateUI() {
   turnEl.textContent = t('turn', { n: game.turn });
+  // On phones the top bar is tight, so labels collapse to icons + counts.
+  const compact = narrowMq.matches;
   const pendingUnits = game.units.filter(unitPending).length;
   const idleCities = game.cities.filter(c => c.owner === 'player' && !c.producing).length;
   if (pendingUnits > 0) {
-    endTurnBtn.textContent = t('endTurn.units', { n: pendingUnits });
+    endTurnBtn.textContent = t(compact ? 'endTurn.units.short' : 'endTurn.units', { n: pendingUnits });
     endTurnBtn.classList.add('warn');
     endTurnBtn.title = t('endTurn.force');
   } else if (idleCities > 0) {
-    endTurnBtn.textContent = t('endTurn.city');
+    endTurnBtn.textContent = t(compact ? 'endTurn.city.short' : 'endTurn.city');
     endTurnBtn.classList.add('warn');
     endTurnBtn.title = t('endTurn.force');
   } else if (researchPending()) {
-    endTurnBtn.textContent = t('endTurn.research');
+    endTurnBtn.textContent = t(compact ? 'endTurn.research.short' : 'endTurn.research');
     endTurnBtn.classList.add('warn');
     endTurnBtn.title = t('endTurn.force');
   } else {
@@ -545,12 +551,16 @@ function updateUI() {
     endTurnBtn.title = '';
   }
   restartBtn.textContent = t('newGame');
-  techBtn.textContent = game.researching
-    ? t('research.current', {
-        tech: `tech.${game.researching}`,
-        turns: game.techTurns(game.researching),
-      })
-    : t('research.idle');
+  if (game.researching) {
+    const turns = game.techTurns(game.researching);
+    techBtn.textContent = compact
+      ? t('research.current.short', { turns })
+      : t('research.current', { tech: `tech.${game.researching}`, turns });
+    techBtn.title = t('research.current', { tech: `tech.${game.researching}`, turns });
+  } else {
+    techBtn.textContent = compact ? t('research.idle.short') : t('research.idle');
+    techBtn.title = t('research.idle');
+  }
   techBtn.classList.toggle('warn', researchPending());
   if (!techPanel.classList.contains('hidden')) renderTechPanel();
   logEl.innerHTML = game.log
